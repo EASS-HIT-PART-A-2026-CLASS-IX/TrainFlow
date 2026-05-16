@@ -1,8 +1,8 @@
 # TrainFlow
 
-TrainFlow is a workout planning system. This repository currently contains the Exercise backend as the first implemented component.
+TrainFlow is a workout planning system. This repository contains the Exercise backend (EX1) and a Streamlit interface (EX2) for browsing and managing exercises.
 
-The Exercise backend manages exercise definitions using FastAPI and in-memory storage. The repository is intended to grow into a larger monorepo in future exercises.
+The Exercise backend manages exercise definitions using FastAPI and in-memory storage. The Streamlit interface connects to the backend over HTTP and lets you list, filter, add, and export exercises without touching the backend code.
 
 ## Design & Development Approach
 
@@ -53,7 +53,6 @@ All generated code was reviewed and adjusted to ensure correctness, clarity, and
 This repository is structured as the starting point of a larger TrainFlow monorepo. In future exercises, it can be extended with:
 
 - a Workout service for composing exercise plans
-- a user interface for browsing and managing exercises
 - additional services such as recommendation or analytics
 
 By keeping the current implementation focused and well-structured, it can be easily integrated into a broader multi-service architecture.
@@ -62,42 +61,51 @@ By keeping the current implementation focused and well-structured, it can be eas
 
 - `README.md` - TrainFlow repository overview
 - `docs/` - product and roadmap documentation
-- `services/exercise-service/app/main.py` - FastAPI application entry point
-- `services/exercise-service/app/models.py` - Pydantic models and enums
-- `services/exercise-service/app/repository.py` - in-memory repository for exercises
-- `services/exercise-service/app/routes.py` - API routes for CRUD operations
-- `services/exercise-service/tests/test_exercises.py` - pytest test suite
-- `services/exercise-service/pyproject.toml` - Exercise service configuration and dependencies
-- `services/exercise-service/uv.lock` - Exercise service dependency lockfile
-- `services/exercise-service/.gitignore` - Exercise service ignore rules
+- `services/exercise-service/` - FastAPI Exercise Catalog backend (EX1)
+  - `app/main.py` - FastAPI application entry point
+  - `app/models.py` - Pydantic models and enums
+  - `app/repository.py` - in-memory repository for exercises
+  - `app/routes.py` - API routes for CRUD operations
+  - `tests/test_exercises.py` - pytest test suite
+  - `pyproject.toml` - Exercise service dependencies
+- `interface/` - Streamlit interface (EX2)
+  - `app.py` - Streamlit entrypoint
+  - `client.py` - HTTP client wrapping the backend
+  - `filters.py` - client-side filter logic
+  - `export.py` - PNG reference sheet generation
+  - `tests/` - pytest tests for filter and export logic
+  - `pyproject.toml` - interface dependencies
 
-## Create and Activate a Virtual Environment with uv
+## EX2: Running the Interface
 
+The interface requires the backend to be running first. Open two terminals:
+
+**Terminal 1 — start the backend:**
 ```bash
 cd services/exercise-service
-uv venv
-source .venv/bin/activate
+uv run uvicorn app.main:app --reload
 ```
 
-On Windows PowerShell:
-
-```powershell
-cd services/exercise-service
-uv venv
-.venv\Scripts\Activate.ps1
+**Terminal 2 — start the interface:**
+```bash
+cd interface
+uv run streamlit run app.py
 ```
 
-## Install Dependencies
+The interface opens at `http://localhost:8501`.
+
+**What you can do in the interface:**
+
+- **Browse Exercises** tab: view all exercises in a table, filter by muscle group, equipment, or difficulty using the sidebar, and export the visible exercises as a PNG reference sheet.
+- **Add Exercise** tab: fill in the form to add a new exercise; client-side validation runs before the request is sent.
+
+> Note: the backend stores exercises in memory. Restarting the backend resets the catalog.
+
+## EX1: Running the API Directly
 
 ```bash
 cd services/exercise-service
 uv sync --dev
-```
-
-## Run the API Locally
-
-```bash
-cd services/exercise-service
 uv run uvicorn app.main:app --reload
 ```
 
@@ -110,8 +118,15 @@ Interactive docs:
 
 ## Run the Tests
 
+Backend:
 ```bash
 cd services/exercise-service
+uv run pytest
+```
+
+Interface:
+```bash
+cd interface
 uv run pytest
 ```
 
