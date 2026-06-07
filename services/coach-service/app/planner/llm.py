@@ -6,10 +6,22 @@ network.
 """
 
 import json
+import logging
 import os
+import re
 from typing import Protocol
 
 from app.planner.context import CoachContext
+
+logger = logging.getLogger("trainflow.coach.planner")
+
+# Redact any leaked secrets (e.g. ?key=... query params) before logging.
+_SECRET_RE = re.compile(r"((?:key|api[_-]?key)=)[^&\s]+", re.IGNORECASE)
+
+
+def _safe_error(exc: Exception) -> str:
+    message = _SECRET_RE.sub(r"\1[REDACTED]", str(exc))
+    return f"{type(exc).__name__}: {message}"
 from app.planner.fallback import FallbackPlanner
 from app.planner.validation import validate_llm_days
 from app.schemas import (
@@ -109,15 +121,22 @@ class LLMPlanner:
     ) -> WorkoutPlan:
         fallback_plan = self._fallback.generate(request, catalog, context)
 
+        client_name = self._client.__class__.__name__
         try:
             raw = self._client.generate_plan(
                 _SYSTEM_PROMPT, _build_user_prompt(request, catalog, context)
             )
             output = LLMPlanOutput.model_validate(raw)
-        except Exception:  # noqa: BLE001 - any LLM/parse failure degrades to fallback
+        except Exception as exc:  # noqa: BLE001 - any LLM/parse failure degrades to fallback
+            logger.warning(
+                "LLM planner (%s) failed; falling back to deterministic planner. %s",
+                client_name,
+                _safe_error(exc),
+            )
             return fallback_plan
 
         days = validate_llm_days(output.days, request, catalog, fallback_plan)
+        logger.info("LLM planner (%s) produced a plan with %d day(s)", client_name, len(days))
         insights = context.insights or output.insights
         return WorkoutPlan(
             goal=request.goal,
