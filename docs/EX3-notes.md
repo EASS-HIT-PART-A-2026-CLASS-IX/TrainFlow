@@ -131,9 +131,9 @@ touching the planner or validation. `COACH_PROVIDER` selects it:
 
 | Provider | Cost | Notes |
 |---|---|---|
-| `auto` (default) | — | Anthropic if `ANTHROPIC_API_KEY` is set, else fallback |
+| `auto` (default) | — | Gemini if `GEMINI_API_KEY` is set, else Anthropic if `ANTHROPIC_API_KEY` is set, else fallback |
+| `gemini` | **free cloud tier** | Google Gemini REST API (JSON mode); default `gemini-2.0-flash`; key from aistudio.google.com (no billing) |
 | `anthropic` | paid | `messages.parse` structured output; default `claude-opus-4-8` |
-| `ollama` | **free, local** | No key/billing; runs e.g. `llama3.1` locally via the `ollama` compose profile; JSON-schema structured output |
 | `fallback` | free | Deterministic planner only |
 
 Because the catalog-only validation/repair layer runs regardless of provider, a

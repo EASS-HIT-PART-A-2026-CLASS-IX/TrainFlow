@@ -44,27 +44,28 @@ Demo logins: `admin` / `admin123` (full access), `athlete` / `athlete123`
    personalized from the seeded chest-heavy history and shows whether it came
    from the LLM or the fallback planner.
 
-## 4. Optional — free local LLM (Ollama)
+## 4. Optional — free cloud LLM (Gemini)
 
-By default the coach uses the deterministic fallback planner (or Anthropic if you
-set `ANTHROPIC_API_KEY`). For a free, fully-local LLM with no key and no billing,
-use Ollama:
+By default the coach uses the deterministic fallback planner. For a free,
+zero-billing LLM, use Google Gemini:
 
 ```bash
-# 1. Start the Ollama service (opt-in profile)
-docker compose --profile ollama up -d ollama
+# 1. Get a free API key (no billing) at https://aistudio.google.com/apikey
 
-# 2. Pull a model once (~5 GB; cached in a volume)
-docker compose exec ollama ollama pull llama3.1
+# 2. Add it to .env
+echo "GEMINI_API_KEY=your-key-here" >> .env
 
-# 3. Point the coach at it and restart
-echo "COACH_PROVIDER=ollama" >> .env
+# 3. Restart the coach
 docker compose up -d --build coach-service
 ```
 
-Generated plans will now show `generated_by: "llm"`. If Ollama is unreachable or
-slow, the coach transparently falls back to the deterministic planner. Override
-the model with `OLLAMA_MODEL` in `.env`.
+In `auto` mode the coach uses Gemini automatically when `GEMINI_API_KEY` is set,
+so generated plans now show `generated_by: "llm"`. If Gemini is unreachable or
+rate-limited, the coach transparently falls back to the deterministic planner.
+Override the model with `GEMINI_MODEL` in `.env` (default `gemini-2.0-flash`).
+
+To use Anthropic Claude instead, set `ANTHROPIC_API_KEY` (and optionally
+`COACH_PROVIDER=anthropic`).
 
 ## 5. Optional — the refresh worker
 
