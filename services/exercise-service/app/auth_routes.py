@@ -1,0 +1,35 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from sqlmodel import Session, select
+
+from app.auth import create_access_token, get_current_user, verify_password
+from app.db import get_session
+from app.models import Token, UserRead, UserTable
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+@router.post("/token", response_model=Token)
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    session: Session = Depends(get_session),
+) -> Token:
+    user = session.exec(select(UserTable).where(UserTable.username == form_data.username)).first()
+    if user is None or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Grant the intersection of what the user holds and what was requested.
+    # An empty request defaults to all of the user's scopes.
+    requested = set(form_data.scopes) if form_data.scopes else set(user.scopes)
+    granted = [scope for scope in user.scopes if scope in requested]
+    token = create_access_token(user.username, granted)
+    return Token(access_token=token, scopes=granted)
+
+
+@router.get("/me", response_model=UserRead)
+def read_me(user: UserTable = Depends(get_current_user)) -> UserRead:
+    return UserRead(username=user.username, role=user.role, scopes=user.scopes)
