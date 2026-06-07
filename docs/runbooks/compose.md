@@ -44,7 +44,29 @@ Demo logins: `admin` / `admin123` (full access), `athlete` / `athlete123`
    personalized from the seeded chest-heavy history and shows whether it came
    from the LLM or the fallback planner.
 
-## 4. Optional — the refresh worker
+## 4. Optional — free local LLM (Ollama)
+
+By default the coach uses the deterministic fallback planner (or Anthropic if you
+set `ANTHROPIC_API_KEY`). For a free, fully-local LLM with no key and no billing,
+use Ollama:
+
+```bash
+# 1. Start the Ollama service (opt-in profile)
+docker compose --profile ollama up -d ollama
+
+# 2. Pull a model once (~5 GB; cached in a volume)
+docker compose exec ollama ollama pull llama3.1
+
+# 3. Point the coach at it and restart
+echo "COACH_PROVIDER=ollama" >> .env
+docker compose up -d --build coach-service
+```
+
+Generated plans will now show `generated_by: "llm"`. If Ollama is unreachable or
+slow, the coach transparently falls back to the deterministic planner. Override
+the model with `OLLAMA_MODEL` in `.env`.
+
+## 5. Optional — the refresh worker
 
 The async worker is opt-in via a compose profile:
 
@@ -59,7 +81,7 @@ docker compose run --rm refresh-worker \
   uv run --no-sync python refresh.py once --enqueue --job-id demo-1
 ```
 
-## 5. Teardown
+## 6. Teardown
 
 ```bash
 docker compose down          # stop containers

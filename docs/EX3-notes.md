@@ -119,11 +119,26 @@ structured workout planning over the catalog. The LLM is central but bounded:
    is not in the catalog or violates the equipment/avoid constraints, and tops up
    empty days from the deterministic fallback — so the model can never invent an
    exercise and the response is always complete.
-4. With no `ANTHROPIC_API_KEY`, the coach uses the **fallback planner**
-   automatically. **Tests never call a real LLM** — the client is injected and a
-   fake returns canned (including deliberately invalid) output.
+4. With no LLM configured, the coach uses the **fallback planner** automatically.
+   **Tests never call a real LLM** — the client is injected and a fake returns
+   canned (including deliberately invalid) output.
 
-Default model: `claude-opus-4-8` (override via `COACH_MODEL`).
+### Pluggable providers
+
+The LLM is reached through an injected `LLMClient` protocol
+(`generate_plan(system, user) -> dict`), so the provider is swappable without
+touching the planner or validation. `COACH_PROVIDER` selects it:
+
+| Provider | Cost | Notes |
+|---|---|---|
+| `auto` (default) | — | Anthropic if `ANTHROPIC_API_KEY` is set, else fallback |
+| `anthropic` | paid | `messages.parse` structured output; default `claude-opus-4-8` |
+| `ollama` | **free, local** | No key/billing; runs e.g. `llama3.1` locally via the `ollama` compose profile; JSON-schema structured output |
+| `fallback` | free | Deterministic planner only |
+
+Because the catalog-only validation/repair layer runs regardless of provider, a
+smaller free model is safe — bad or hallucinated picks are dropped and topped up
+from the fallback.
 
 ## Redis job / idempotency model
 
