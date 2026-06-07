@@ -1,7 +1,9 @@
+from datetime import date, timedelta
+
 from sqlmodel import Session, select
 
 from app.auth import hash_password
-from app.models import ExerciseTable, UserTable
+from app.models import ExerciseTable, UserTable, WorkoutExercise, WorkoutSession
 
 ALL_SCOPES = ["exercises:write", "history:read", "history:write", "coach:use"]
 ATHLETE_SCOPES = ["history:read", "history:write", "coach:use"]
@@ -170,6 +172,66 @@ def seed_exercises(session: Session) -> None:
     session.commit()
 
 
+# Two recent chest/push-focused sessions so the Coach has history to reason
+# about (e.g. "recent sessions were chest-heavy -> add back volume").
+_DEMO_SESSIONS = [
+    {
+        "days_ago": 2,
+        "goal": "hypertrophy",
+        "notes": "Heavy chest day",
+        "exercises": [
+            ("Barbell Bench Press", 4, 8, 60.0),
+            ("Incline Dumbbell Press", 3, 10, 24.0),
+            ("Push Up", 3, 15, None),
+            ("Triceps Pushdown", 3, 12, 25.0),
+        ],
+    },
+    {
+        "days_ago": 4,
+        "goal": "hypertrophy",
+        "notes": "Push session",
+        "exercises": [
+            ("Overhead Press", 4, 8, 40.0),
+            ("Dumbbell Lateral Raise", 3, 15, 8.0),
+            ("Barbell Bench Press", 3, 10, 55.0),
+        ],
+    },
+]
+
+
+def seed_sessions(session: Session) -> None:
+    if session.exec(select(WorkoutSession)).first() is not None:
+        return
+
+    def exercise_id(name: str) -> int | None:
+        row = session.exec(select(ExerciseTable).where(ExerciseTable.name == name)).first()
+        return row.id if row is not None else None
+
+    today = date.today()
+    for spec in _DEMO_SESSIONS:
+        workout = WorkoutSession(
+            date=today - timedelta(days=spec["days_ago"]),
+            goal=spec["goal"],
+            notes=spec["notes"],
+        )
+        session.add(workout)
+        session.flush()
+        for name, sets, reps, weight in spec["exercises"]:
+            eid = exercise_id(name)
+            if eid is not None:
+                session.add(
+                    WorkoutExercise(
+                        session_id=workout.id,
+                        exercise_id=eid,
+                        sets=sets,
+                        reps=reps,
+                        weight=weight,
+                    )
+                )
+    session.commit()
+
+
 def seed_all(session: Session) -> None:
     seed_users(session)
     seed_exercises(session)
+    seed_sessions(session)

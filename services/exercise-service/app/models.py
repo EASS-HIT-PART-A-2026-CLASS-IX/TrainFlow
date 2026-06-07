@@ -1,3 +1,4 @@
+from datetime import date
 from enum import Enum
 
 from pydantic import AnyUrl, BaseModel, Field, field_validator, model_validator
@@ -101,6 +102,56 @@ class UserTable(SQLModel, table=True):
     hashed_password: str
     role: str
     scopes: list[str] = SQLField(sa_column=Column(JSON))
+
+
+class WorkoutSession(SQLModel, table=True):
+    __tablename__ = "workoutsession"
+
+    id: int | None = SQLField(default=None, primary_key=True)
+    date: date
+    goal: str
+    notes: str | None = None
+
+
+class WorkoutExercise(SQLModel, table=True):
+    __tablename__ = "workoutexercise"
+
+    id: int | None = SQLField(default=None, primary_key=True)
+    session_id: int = SQLField(foreign_key="workoutsession.id", index=True)
+    exercise_id: int = SQLField(foreign_key="exercise.id")
+    sets: int
+    reps: int
+    weight: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# Workout history API schemas. Kept intentionally lightweight.
+# ---------------------------------------------------------------------------
+class WorkoutExerciseInput(BaseModel):
+    exercise_id: int
+    sets: int = Field(ge=1, le=10)
+    reps: int = Field(ge=1, le=100)
+    weight: float | None = Field(default=None, ge=0)
+
+
+class WorkoutExerciseRead(WorkoutExerciseInput):
+    id: int
+    exercise_name: str | None = None
+
+
+class WorkoutSessionInput(BaseModel):
+    date: date
+    goal: Goal
+    notes: str | None = None
+    exercises: list[WorkoutExerciseInput] = Field(min_length=1)
+
+
+class WorkoutSessionRead(BaseModel):
+    id: int
+    date: date
+    goal: Goal
+    notes: str | None = None
+    exercises: list[WorkoutExerciseRead]
 
 
 # ---------------------------------------------------------------------------
