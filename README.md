@@ -1,8 +1,21 @@
 # TrainFlow
 
-TrainFlow is a workout planning system. This repository contains the Exercise backend (EX1) and a Streamlit interface (EX2) for browsing and managing exercises.
+TrainFlow is a local, full-stack workout-planning system built across three exercises:
 
-The Exercise backend manages exercise definitions using FastAPI and in-memory storage. The Streamlit interface connects to the backend over HTTP and lets you list, filter, add, and export exercises without touching the backend code.
+- **EX1** — the Exercise backend (FastAPI).
+- **EX2** — a Streamlit interface for browsing and managing exercises.
+- **EX3** — **TrainFlow Coach**: an AI-powered, history-aware planner. A Coach service generates structured, schema-validated workout plans from the persisted catalog, the user's training context, and their recent workout history. The LLM is central but bounded — it may only select existing catalog exercises, output is schema-validated, tests never call a real LLM, and without an API key a deterministic fallback planner takes over.
+
+## EX3: TrainFlow Coach (quickstart)
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Then open the interface at `http://localhost:8501`, log in as `athlete` / `athlete123`, and use the **Coach** tab. Full details: [`docs/EX3-notes.md`](docs/EX3-notes.md) and the runbook [`docs/runbooks/compose.md`](docs/runbooks/compose.md). A scripted end-to-end demo lives at [`scripts/demo.sh`](scripts/demo.sh).
+
+The EX1/EX2 backend now uses **SQLite/SQLModel** persistence and **JWT auth** (hashed credentials, scoped writes). The sections below describe the original EX1/EX2 single-service workflow, which still applies.
 
 ## Design & Development Approach
 
@@ -99,7 +112,7 @@ The interface opens at `http://localhost:8501`.
 - **Browse Exercises** tab: view all exercises in a table, filter by muscle group, equipment, or difficulty using the sidebar, and export the visible exercises as a PNG reference sheet.
 - **Add Exercise** tab: fill in the form to add a new exercise; client-side validation runs before the request is sent.
 
-> Note: the backend stores exercises in memory. Restarting the backend resets the catalog.
+> Note: as of EX3 the backend persists exercises in SQLite, and write operations (Add Exercise) require logging in as a user with the `exercises:write` scope (e.g. `admin` / `admin123`).
 
 ## EX1: Running the API Directly
 
@@ -118,16 +131,12 @@ Interactive docs:
 
 ## Run the Tests
 
-Backend:
+Each component has its own suite:
 ```bash
-cd services/exercise-service
-uv run pytest
-```
-
-Interface:
-```bash
-cd interface
-uv run pytest
+cd services/exercise-service && uv run pytest   # catalog, auth, history
+cd services/coach-service    && uv run pytest   # planner, context, fake-LLM, auth
+cd scripts                   && uv run pytest   # refresh worker (anyio + fakeredis)
+cd interface                 && uv run pytest   # filters, export, coach helpers
 ```
 
 ## Available Endpoints
@@ -154,6 +163,7 @@ uv run pytest
 
 ## Notes
 
-- IDs are generated automatically starting from `1`.
-- Data is stored only in memory, so restarting the server resets the catalog.
+- IDs are generated automatically by the database.
+- As of EX3, data is persisted in SQLite (`DATABASE_URL`, default `sqlite:///./trainflow.db`); the catalog and demo users/history are seeded on first startup.
+- `POST` / `PUT` / `DELETE /exercises` require a JWT with the `exercises:write` scope (`POST /auth/token`); `GET` endpoints remain public.
 - Validation is handled with FastAPI and Pydantic, including enum checks, blank-name rejection, and muscle overlap rules.
