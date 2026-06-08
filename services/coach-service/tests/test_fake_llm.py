@@ -1,5 +1,5 @@
 from app.planner.context import CoachContext
-from app.planner.llm import LLMPlanner
+from app.planner.llm import LLMPlanner, _normalize_output
 from app.schemas import PlanRequest
 
 EMPTY_CONTEXT = CoachContext()
@@ -117,3 +117,60 @@ def test_malformed_llm_output_degrades_to_fallback(catalog):
 
     assert plan.generated_by == "fallback"
     assert plan.days
+
+
+def test_plan_alias_is_normalized_to_days(catalog):
+    # The model returned the day array under "plan" instead of "days".
+    fake = FakeLLM(
+        {
+            "plan": [
+                {"focus": "Push", "items": [
+                    {"exercise_id": 1, "sets": 4, "reps": "8-12", "rest_seconds": 90},
+                ]},
+            ],
+            "insights": [],
+        }
+    )
+    plan = LLMPlanner(fake).generate(_request(days_per_week=1), catalog, EMPTY_CONTEXT)
+
+    assert plan.generated_by == "llm"
+    assert _all_item_ids(plan) == [1]
+
+
+def test_exercises_alias_at_day_level_is_normalized(catalog):
+    # The day array is correct, but items came under "exercises".
+    fake = FakeLLM(
+        {
+            "days": [
+                {"focus": "Push", "exercises": [
+                    {"exercise_id": 1, "sets": 4, "reps": "8-12", "rest_seconds": 90},
+                ]},
+            ],
+        }
+    )
+    plan = LLMPlanner(fake).generate(_request(days_per_week=1), catalog, EMPTY_CONTEXT)
+
+    assert plan.generated_by == "llm"
+    assert _all_item_ids(plan) == [1]
+
+
+def test_normalize_output_maps_aliases():
+    raw = {"plan": [{"focus": "A", "exercises": [{"exercise_id": 1}]}]}
+    out = _normalize_output(raw)
+    assert "days" in out and "plan" not in out
+    assert out["days"][0]["items"] == [{"exercise_id": 1}]
+
+
+def test_normalize_output_leaves_canonical_keys_untouched():
+    raw = {"days": [{"focus": "A", "items": [{"exercise_id": 1}]}], "notes": "n"}
+    assert _normalize_output(raw) == raw
+
+
+def test_normalize_output_does_not_invent_days_when_absent():
+    # No recognizable alias -> stays malformed -> Pydantic will reject it.
+    raw = {"nonsense": 123}
+    assert "days" not in _normalize_output(raw)
+
+
+def test_normalize_output_passes_through_non_dict():
+    assert _normalize_output(["not", "a", "dict"]) == ["not", "a", "dict"]

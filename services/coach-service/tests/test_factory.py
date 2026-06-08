@@ -91,3 +91,40 @@ def test_forced_gemini_generates_llm_plan(monkeypatch, catalog):
     assert plan.generated_by == "llm"
     assert plan.days and plan.days[0].items
     assert plan.days[0].items[0].exercise_id == 1
+
+
+def test_forced_gemini_plan_alias_is_normalized(monkeypatch, catalog):
+    """The exact reported case: Gemini returns the day array under `plan`.
+    It is normalized to `days` and yields an LLM plan, not a fallback."""
+    monkeypatch.setenv("COACH_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+
+    aliased = {  # top-level "plan" instead of "days"
+        "plan": [{"focus": "Push", "items": [
+            {"exercise_id": 1, "sets": 4, "reps": "8-12", "rest_seconds": 90},
+        ]}],
+        "insights": [],
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [
+                {"text": __import__("json").dumps(aliased)}
+            ]}}]}
+
+    monkeypatch.setattr("app.planner.gemini.httpx.post", lambda *a, **k: FakeResponse())
+
+    from app.planner.context import CoachContext
+    from app.schemas import PlanRequest
+
+    plan = get_planner().generate(
+        PlanRequest(goal="hypertrophy", experience="intermediate",
+                    days_per_week=1, session_minutes=60),
+        catalog,
+        CoachContext(),
+    )
+    assert plan.generated_by == "llm"
+    assert plan.days[0].items[0].exercise_id == 1

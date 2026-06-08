@@ -12,6 +12,14 @@ import re
 from typing import Protocol
 
 from app.planner.context import CoachContext
+from app.planner.fallback import FallbackPlanner
+from app.planner.validation import validate_llm_days
+from app.schemas import (
+    CatalogExercise,
+    LLMPlanOutput,
+    PlanRequest,
+    WorkoutPlan,
+)
 
 logger = logging.getLogger("trainflow.coach.planner")
 
@@ -22,16 +30,30 @@ _SECRET_RE = re.compile(r"((?:key|api[_-]?key)=)[^&\s]+", re.IGNORECASE)
 def _safe_error(exc: Exception) -> str:
     message = _SECRET_RE.sub(r"\1[REDACTED]", str(exc))
     return f"{type(exc).__name__}: {message}"
-from app.planner.fallback import FallbackPlanner
-from app.planner.validation import validate_llm_days
-from app.schemas import (
-    CatalogExercise,
-    LLMPlanOutput,
-    PlanRequest,
-    WorkoutPlan,
-)
+
 
 COACH_MODEL = os.getenv("COACH_MODEL", "claude-opus-4-8")
+
+# A minimal example using the EXACT LLMPlanOutput schema, embedded in the prompt
+# so the model emits the right field names.
+_OUTPUT_EXAMPLE = {
+    "days": [
+        {
+            "focus": "Upper body",
+            "items": [
+                {
+                    "exercise_id": 1,
+                    "sets": 4,
+                    "reps": "8-12",
+                    "rest_seconds": 90,
+                    "rationale": "primary chest movement",
+                }
+            ],
+        }
+    ],
+    "insights": ["short personalization note"],
+    "notes": "optional overall note",
+}
 
 _SYSTEM_PROMPT = (
     "You are TrainFlow Coach, an expert strength & conditioning planner. "
@@ -44,8 +66,56 @@ _SYSTEM_PROMPT = (
     "- Use the recent-history signals to personalize: avoid recently overused "
     "exercises and rebalance toward under-trained muscle groups.\n"
     "- Distribute work across the requested number of training days.\n"
-    "Return one plan that matches the requested goal and schedule."
+    "\nOUTPUT FORMAT (STRICT): Return a single JSON object with EXACTLY these "
+    "top-level keys:\n"
+    '  - "days" (REQUIRED): a JSON array of day objects.\n'
+    '  - "insights": an array of short strings.\n'
+    '  - "notes": a string or null.\n'
+    'Do NOT use any other top-level key name (no "plan", "workout", "schedule", '
+    '"week", etc.) — the array of days MUST be named "days".\n'
+    'Each day object has "focus" (string) and "items" (array). Each item has '
+    '"exercise_id" (integer from the catalog), "sets" (integer), "reps" '
+    '(string, e.g. "8-12"), "rest_seconds" (integer), and optional "rationale" '
+    "(string).\n"
+    "Respond with ONLY the JSON object, matching this example exactly:\n"
+    + json.dumps(_OUTPUT_EXAMPLE, indent=2)
 )
+
+# Safe aliases the model sometimes emits, mapped to the canonical schema keys.
+# Normalization only fills a canonical key when it is missing — it never
+# overwrites valid data, and strict Pydantic validation still runs afterwards.
+_DAYS_ALIASES = ("plan", "workouts", "workout_days", "schedule", "week", "training_days")
+_ITEMS_ALIASES = ("exercises", "movements", "workout", "sets_list")
+
+
+def _normalize_output(raw: object) -> object:
+    """Rename common top-level/day-level aliases to the canonical schema keys.
+    Does not coerce types or invent values — anything still malformed is caught
+    by Pydantic validation and falls back."""
+    if not isinstance(raw, dict):
+        return raw
+    obj = dict(raw)
+
+    if "days" not in obj:
+        for alias in _DAYS_ALIASES:
+            if isinstance(obj.get(alias), list):
+                obj["days"] = obj.pop(alias)
+                break
+
+    days = obj.get("days")
+    if isinstance(days, list):
+        normalized_days = []
+        for day in days:
+            if isinstance(day, dict) and "items" not in day:
+                day = dict(day)
+                for alias in _ITEMS_ALIASES:
+                    if isinstance(day.get(alias), list):
+                        day["items"] = day.pop(alias)
+                        break
+            normalized_days.append(day)
+        obj["days"] = normalized_days
+
+    return obj
 
 
 class LLMClient(Protocol):
@@ -126,7 +196,7 @@ class LLMPlanner:
             raw = self._client.generate_plan(
                 _SYSTEM_PROMPT, _build_user_prompt(request, catalog, context)
             )
-            output = LLMPlanOutput.model_validate(raw)
+            output = LLMPlanOutput.model_validate(_normalize_output(raw))
         except Exception as exc:  # noqa: BLE001 - any LLM/parse failure degrades to fallback
             logger.warning(
                 "LLM planner (%s) failed; falling back to deterministic planner. %s",
