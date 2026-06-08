@@ -3,9 +3,12 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
+import ui_styles as ui
 from client import (
     BackendUnavailableError,
+    coach_status,
     create_exercise,
+    delete_exercise,
     get_me,
     list_exercises,
     list_sessions,
@@ -13,10 +16,12 @@ from client import (
     login,
     register,
     request_plan,
+    update_exercise,
 )
 from coach import EXPERIENCES, GOALS, build_plan_payload, plan_day_rows, resolve_avoid_ids
 from export import generate_reference_sheet
 from filters import apply_filters
+from metrics import compute_dashboard_metrics
 from permissions import can_manage_catalog, history_scope_label, is_admin
 
 _MUSCLE_GROUPS = [
@@ -25,18 +30,21 @@ _MUSCLE_GROUPS = [
 ]
 _EQUIPMENT = ["bodyweight", "dumbbell", "barbell", "machine", "cable", "smith"]
 _DIFFICULTIES = ["beginner", "intermediate", "advanced"]
-
-_BACKEND_HINT = (
-    "Cannot reach the backend. Start it first:\n\n"
-    "`cd services/exercise-service && uv run uvicorn app.main:app --reload`"
-)
+_TAGLINE = "AI-assisted workout planning from your real exercise catalog and training history"
 
 
+# --------------------------------------------------------------------------- #
+# Data + session helpers
+# --------------------------------------------------------------------------- #
 def _load_exercises() -> list[dict] | None:
     try:
         return list_exercises()
     except BackendUnavailableError:
         return None
+
+
+def _md(html: str) -> None:
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def _sign_in(token: str, username: str) -> None:
@@ -46,6 +54,37 @@ def _sign_in(token: str, username: str) -> None:
         st.session_state["user"] = get_me(token)
     except BackendUnavailableError:
         st.session_state["user"] = {"username": username, "role": "athlete", "scopes": []}
+    st.session_state["exercises"] = _load_exercises()
+    st.session_state["page"] = "Dashboard"
+
+
+def _catalog() -> list[dict]:
+    return st.session_state.get("exercises") or []
+
+
+def _grid(html_items: list[str], cols: int = 3) -> None:
+    columns = st.columns(cols)
+    for index, item in enumerate(html_items):
+        with columns[index % cols]:
+            _md(item)
+
+
+# --------------------------------------------------------------------------- #
+# Auth screen (unauthenticated)
+# --------------------------------------------------------------------------- #
+def _auth_screen() -> None:
+    _md(ui.hero("TrainFlow Coach", _TAGLINE))
+    st.write("")
+    left, mid, right = st.columns([1, 1.6, 1])
+    with mid:
+        with st.container(border=True):
+            mode = st.radio(
+                "Mode", ["Log in", "Register"], horizontal=True, label_visibility="collapsed"
+            )
+            if mode == "Log in":
+                _login_form()
+            else:
+                _register_form()
 
 
 def _login_form() -> None:
@@ -53,11 +92,10 @@ def _login_form() -> None:
         st.caption("Demo admin: admin / admin123")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Log in")
+        submitted = st.form_submit_button("Log in", use_container_width=True)
     if submitted:
         try:
-            token = login(username, password)
-            _sign_in(token, username)
+            _sign_in(login(username, password), username)
             st.rerun()
         except ValueError:
             st.error("Incorrect username or password.")
@@ -71,7 +109,7 @@ def _register_form() -> None:
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         confirm = st.text_input("Confirm password", type="password")
-        submitted = st.form_submit_button("Create account")
+        submitted = st.form_submit_button("Create account", use_container_width=True)
     if not submitted:
         return
     if not username.strip():
@@ -82,9 +120,7 @@ def _register_form() -> None:
         return
     try:
         register(username.strip(), password)
-        # Auto-log-in after a successful registration.
-        token = login(username.strip(), password)
-        _sign_in(token, username.strip())
+        _sign_in(login(username.strip(), password), username.strip())
         st.success("Account created — you are now signed in.")
         st.rerun()
     except ValueError as exc:
@@ -93,128 +129,141 @@ def _register_form() -> None:
         st.error("Cannot reach the backend.")
 
 
-def _auth_sidebar() -> None:
-    st.header("Account")
-    user = st.session_state.get("user")
-    if st.session_state.get("token") and user:
-        st.success(f"Signed in as {user['username']} ({user.get('role', 'athlete')})")
-        if st.button("Log out"):
-            for key in ("token", "username", "user"):
-                st.session_state.pop(key, None)
-            st.rerun()
-        return
-
-    mode = st.radio("", ["Log in", "Register"], horizontal=True, label_visibility="collapsed")
-    if mode == "Log in":
-        _login_form()
-    else:
-        _register_form()
-
-
-def _browse_tab(exercises: list[dict] | None, filters: dict) -> None:
-    if exercises is None:
-        st.error(_BACKEND_HINT)
-        return
-
-    filtered = apply_filters(
-        exercises,
-        filters["muscles"],
-        filters["equipment"],
-        filters["difficulties"],
-    )
-    st.caption(f"{len(filtered)} exercise(s) shown")
-
-    if filtered:
-        df = pd.DataFrame(
-            [
-                {
-                    "Name": ex["name"],
-                    "Primary Muscles": ", ".join(ex["primary_muscles"]),
-                    "Secondary Muscles": ", ".join(ex.get("secondary_muscles", [])),
-                    "Equipment": ex["equipment"],
-                    "Difficulty": ex["difficulty"],
-                }
-                for ex in filtered
-            ]
-        )
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No exercises match the selected filters.")
-
-    png_bytes = generate_reference_sheet(filtered)
-    st.download_button(
-        label="Export PNG",
-        data=png_bytes,
-        file_name="workout_reference.png",
-        mime="image/png",
-        disabled=len(filtered) == 0,
-    )
-
-
-def _add_tab() -> None:
-    # Only rendered for admins, but re-check server-authoritative scope anyway.
-    token = st.session_state.get("token")
-    with st.form("add_exercise_form"):
-        name = st.text_input("Name")
-        primary_muscles = st.multiselect("Primary Muscles", _MUSCLE_GROUPS)
-        secondary_muscles = st.multiselect("Secondary Muscles", _MUSCLE_GROUPS)
-        equipment = st.selectbox("Equipment", _EQUIPMENT)
-        difficulty = st.selectbox("Difficulty", _DIFFICULTIES)
-        instructions = st.text_area("Instructions (optional)")
-        media_url = st.text_input("Media URL (optional)")
-        submitted = st.form_submit_button("Add Exercise")
-
-    if not submitted:
-        return
-
-    errors = []
-    if not name.strip():
-        errors.append("Name is required.")
-    if not primary_muscles:
-        errors.append("Select at least one primary muscle.")
-    overlap = set(primary_muscles) & set(secondary_muscles)
-    if overlap:
-        errors.append(f"Muscles cannot be both primary and secondary: {', '.join(sorted(overlap))}")
-    if media_url.strip() and not media_url.strip().startswith(("http://", "https://")):
-        errors.append("Media URL must start with http:// or https://")
-
-    if errors:
-        for err in errors:
-            st.warning(err)
-        return
-
-    payload: dict = {
-        "name": name.strip(),
-        "primary_muscles": primary_muscles,
-        "secondary_muscles": secondary_muscles,
-        "equipment": equipment,
-        "difficulty": difficulty,
-    }
-    if instructions.strip():
-        payload["instructions"] = instructions.strip()
-    if media_url.strip():
-        payload["media_url"] = media_url.strip()
-
+# --------------------------------------------------------------------------- #
+# Pages
+# --------------------------------------------------------------------------- #
+def _page_dashboard(user: dict, provider: str) -> None:
+    token = st.session_state["token"]
+    exercises = _catalog()
     try:
-        create_exercise(payload, token=token)
-        st.success(f'Exercise "{name.strip()}" added successfully.')
-        st.session_state["exercises"] = _load_exercises()
+        sessions = list_sessions(token, limit=20)
     except BackendUnavailableError:
-        st.error("Cannot reach the backend. Is the API running on port 8000?")
-    except ValueError as exc:
-        st.error(f"Validation error: {exc}")
+        sessions = []
+
+    m = compute_dashboard_metrics(exercises, sessions)
+    focus = ", ".join(m["top_focus"]) if m["top_focus"] else "—"
+
+    cards = [
+        ui.metric_card("Exercises", m["total_exercises"], "in catalog", accent=True),
+        ui.metric_card("Workout sessions", m["total_sessions"], history_scope_label(user)),
+        ui.metric_card("Equipment types", m["equipment_types"], "available"),
+        ui.metric_card("Recent focus", focus or "—", "from your history"),
+        ui.metric_card("Coach", ui.provider_label(provider), "active mode"),
+    ]
+    _grid(cards, cols=5)
+
+    st.write("")
+    _md(
+        '<div class="tf-panel"><b>Ready to train?</b> &nbsp;Generate a structured, '
+        "history-aware plan from your catalog in seconds.</div>"
+    )
+    if st.button("Start with Coach", type="primary"):
+        st.session_state["page"] = "AI Coach"
+        st.rerun()
 
 
-def _history_tab(exercises: list[dict] | None) -> None:
-    token = st.session_state.get("token")
-    user = st.session_state.get("user")
-    if not token:
-        st.info("Log in to view and log workout history.")
+def _page_coach(user: dict, provider: str) -> None:
+    token = st.session_state["token"]
+    catalog = _catalog()
+    catalog_by_id = {ex["id"]: ex for ex in catalog if "id" in ex}
+
+    st.subheader("AI Coach")
+    _md(ui.provider_badge(provider))
+    form_col, result_col = st.columns([1, 1.3], gap="large")
+
+    with form_col:
+        with st.form("coach_form"):
+            goal = st.selectbox("Goal", GOALS, index=1)
+            experience = st.selectbox("Experience", EXPERIENCES, index=1)
+            c1, c2 = st.columns(2)
+            with c1:
+                days_per_week = st.slider("Days / week", 1, 7, 3)
+            with c2:
+                session_minutes = st.slider("Minutes / session", 15, 120, 60, step=5)
+            available_equipment = st.multiselect("Available equipment", _EQUIPMENT)
+            target_muscles = st.multiselect("Focus muscles (likes)", _MUSCLE_GROUPS)
+            avoid_names = st.multiselect(
+                "Avoid exercises (dislikes)", [ex["name"] for ex in catalog]
+            )
+            submitted = st.form_submit_button("Generate plan", type="primary", use_container_width=True)
+
+    if submitted:
+        payload = build_plan_payload(
+            goal=goal,
+            experience=experience,
+            days_per_week=days_per_week,
+            session_minutes=session_minutes,
+            available_equipment=available_equipment,
+            target_muscles=target_muscles,
+            avoid_exercise_ids=resolve_avoid_ids(avoid_names, catalog),
+        )
+        try:
+            with st.spinner("Coach is designing your plan..."):
+                st.session_state["last_plan"] = request_plan(payload, token)
+        except BackendUnavailableError:
+            st.session_state["last_plan"] = None
+            st.error("Cannot reach the coach service. Is it running on port 8001?")
+        except ValueError as exc:
+            st.session_state["last_plan"] = None
+            st.error(f"Coach error: {exc}")
+
+    with result_col:
+        plan = st.session_state.get("last_plan")
+        if not plan:
+            _md(ui.empty_state("No plan yet", "Set your goal and generate a plan to see it here."))
+            return
+
+        _md(ui.provider_badge(plan.get("generated_by", provider)))
+        for insight in plan.get("insights", []):
+            _md(ui.insight_panel(insight))
+        for index, day in enumerate(plan.get("days", []), start=1):
+            _md(ui.plan_day_card(index, day.get("focus", "Workout"), day.get("items", []), catalog_by_id))
+        if plan.get("notes"):
+            st.caption(plan["notes"])
+
+
+def _page_catalog() -> None:
+    st.subheader("Exercise Catalog")
+    exercises = st.session_state.get("exercises")
+    if exercises is None:
+        st.error("Cannot reach the backend.")
         return
 
-    st.caption(f"Showing {history_scope_label(user)}.")
-    catalog = exercises or []
+    with st.container(border=True):
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            muscles = st.multiselect("Muscle group", _MUSCLE_GROUPS)
+        with f2:
+            equipment = st.multiselect("Equipment", _EQUIPMENT)
+        with f3:
+            difficulties = st.multiselect("Difficulty", _DIFFICULTIES)
+
+    filtered = apply_filters(exercises, muscles, equipment, difficulties)
+    st.caption(f"{len(filtered)} exercise(s)")
+
+    if not filtered:
+        _md(ui.empty_state("No matches", "Try clearing a filter to see more exercises."))
+        return
+
+    _grid([ui.exercise_card(ex) for ex in filtered], cols=3)
+
+    with st.expander("Export reference sheet (PNG)"):
+        st.download_button(
+            "Download PNG",
+            data=generate_reference_sheet(filtered),
+            file_name="trainflow_reference.png",
+            mime="image/png",
+        )
+
+
+def _page_history(user: dict) -> None:
+    token = st.session_state["token"]
+    catalog = _catalog()
     by_id = {ex["id"]: ex for ex in catalog if "id" in ex}
+    name_to_id = {ex["name"]: ex["id"] for ex in catalog if "id" in ex}
+
+    st.subheader("Workout History")
+    st.caption(f"Showing {history_scope_label(user)}.")
 
     try:
         sessions = list_sessions(token, limit=20)
@@ -224,166 +273,226 @@ def _history_tab(exercises: list[dict] | None) -> None:
 
     if sessions:
         for s in sessions:
-            owner = f" · {s.get('owner')}" if is_admin(user) and s.get("owner") else ""
-            with st.expander(f"{s['date']} — {s['goal']}{owner}"):
-                rows = [
-                    {
-                        "Exercise": by_id.get(i["exercise_id"], {}).get(
-                            "name", i.get("exercise_name", f"#{i['exercise_id']}")
-                        ),
-                        "Sets": i["sets"],
-                        "Reps": i["reps"],
-                        "Weight": i.get("weight"),
-                    }
-                    for i in s["exercises"]
-                ]
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            lines = []
+            for i in s["exercises"]:
+                name = by_id.get(i["exercise_id"], {}).get(
+                    "name", i.get("exercise_name", f"#{i['exercise_id']}")
+                )
+                weight = f" @ {i['weight']}kg" if i.get("weight") else ""
+                lines.append(f"{name} — {i['sets']}×{i['reps']}{weight}")
+            _md(ui.session_card(s, lines, show_owner=is_admin(user)))
     else:
-        st.info("No workout history yet. Log your first session below.")
+        _md(ui.empty_state("No sessions yet", "Log your first workout below to personalize your coach."))
 
-    st.divider()
-    st.subheader("Log a session")
-    with st.form("log_session_form"):
-        date = st.date_input("Date", value=dt.date.today())
-        goal = st.selectbox("Goal", GOALS, index=1)
-        names = st.multiselect("Exercises", [ex["name"] for ex in catalog])
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            sets = st.number_input("Sets", min_value=1, max_value=10, value=3)
-        with col2:
-            reps = st.number_input("Reps", min_value=1, max_value=100, value=10)
-        with col3:
-            weight = st.number_input("Weight (kg, 0 = bodyweight)", min_value=0.0, value=0.0)
-        submitted = st.form_submit_button("Log session")
-
-    if not submitted:
-        return
-    name_to_id = {ex["name"]: ex["id"] for ex in catalog if "id" in ex}
-    chosen_ids = [name_to_id[n] for n in names if n in name_to_id]
-    if not chosen_ids:
-        st.warning("Select at least one exercise.")
-        return
-    payload = {
-        "date": date.isoformat(),
-        "goal": goal,
-        "exercises": [
-            {
-                "exercise_id": eid,
-                "sets": int(sets),
-                "reps": int(reps),
-                "weight": float(weight) if weight > 0 else None,
-            }
-            for eid in chosen_ids
-        ],
-    }
-    try:
-        log_session(payload, token)
-        st.success("Session logged.")
-        st.rerun()
-    except BackendUnavailableError:
-        st.error("Cannot reach the backend.")
-    except ValueError as exc:
-        st.error(f"Could not log session: {exc}")
-
-
-def _coach_tab(exercises: list[dict] | None) -> None:
-    token = st.session_state.get("token")
-    if not token:
-        st.info("Log in (or register) to generate a personalized workout plan.")
-        return
-
-    catalog = exercises or []
-    with st.form("coach_form"):
-        col1, col2 = st.columns(2)
-        with col1:
+    with st.expander("Log a session"):
+        with st.form("log_session_form"):
+            date = st.date_input("Date", value=dt.date.today())
             goal = st.selectbox("Goal", GOALS, index=1)
-            days_per_week = st.slider("Days per week", 1, 7, 3)
-        with col2:
-            experience = st.selectbox("Experience", EXPERIENCES, index=1)
-            session_minutes = st.slider("Session length (minutes)", 15, 120, 60, step=5)
-        available_equipment = st.multiselect("Available equipment", _EQUIPMENT)
-        target_muscles = st.multiselect("Emphasize muscles (optional)", _MUSCLE_GROUPS)
-        avoid_names = st.multiselect(
-            "Avoid exercises (optional)", [ex["name"] for ex in catalog]
-        )
-        submitted = st.form_submit_button("Generate plan")
+            names = st.multiselect("Exercises", [ex["name"] for ex in catalog])
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                sets = st.number_input("Sets", min_value=1, max_value=10, value=3)
+            with c2:
+                reps = st.number_input("Reps", min_value=1, max_value=100, value=10)
+            with c3:
+                weight = st.number_input("Weight (kg, 0 = bodyweight)", min_value=0.0, value=0.0)
+            submitted = st.form_submit_button("Log session", type="primary")
+        if submitted:
+            chosen = [name_to_id[n] for n in names if n in name_to_id]
+            if not chosen:
+                st.warning("Select at least one exercise.")
+                return
+            payload = {
+                "date": date.isoformat(),
+                "goal": goal,
+                "exercises": [
+                    {
+                        "exercise_id": eid,
+                        "sets": int(sets),
+                        "reps": int(reps),
+                        "weight": float(weight) if weight > 0 else None,
+                    }
+                    for eid in chosen
+                ],
+            }
+            try:
+                log_session(payload, token)
+                st.success("Session logged.")
+                st.rerun()
+            except BackendUnavailableError:
+                st.error("Cannot reach the backend.")
+            except ValueError as exc:
+                st.error(f"Could not log session: {exc}")
 
+
+def _page_admin() -> None:
+    token = st.session_state["token"]
+    st.subheader("Admin · Catalog Management")
+    st.caption("Create, update, and delete catalog exercises. Visible to admins only.")
+    exercises = _catalog()
+
+    with st.expander("Add exercise", expanded=True):
+        _admin_add_form(token)
+    with st.expander("Edit exercise"):
+        _admin_edit_form(token, exercises)
+    with st.expander("Delete exercise"):
+        _admin_delete_form(token, exercises)
+
+
+def _exercise_form_fields(prefix: str, defaults: dict | None = None):
+    defaults = defaults or {}
+    name = st.text_input("Name", value=defaults.get("name", ""), key=f"{prefix}_name")
+    primary = st.multiselect(
+        "Primary muscles", _MUSCLE_GROUPS, default=defaults.get("primary_muscles", []),
+        key=f"{prefix}_primary",
+    )
+    secondary = st.multiselect(
+        "Secondary muscles", _MUSCLE_GROUPS, default=defaults.get("secondary_muscles", []),
+        key=f"{prefix}_secondary",
+    )
+    equip_index = _EQUIPMENT.index(defaults["equipment"]) if defaults.get("equipment") in _EQUIPMENT else 0
+    diff_index = _DIFFICULTIES.index(defaults["difficulty"]) if defaults.get("difficulty") in _DIFFICULTIES else 0
+    equipment = st.selectbox("Equipment", _EQUIPMENT, index=equip_index, key=f"{prefix}_equip")
+    difficulty = st.selectbox("Difficulty", _DIFFICULTIES, index=diff_index, key=f"{prefix}_diff")
+    return name, primary, secondary, equipment, difficulty
+
+
+def _build_exercise_payload(name, primary, secondary, equipment, difficulty) -> dict | list[str]:
+    errors = []
+    if not name.strip():
+        errors.append("Name is required.")
+    if not primary:
+        errors.append("Select at least one primary muscle.")
+    overlap = set(primary) & set(secondary)
+    if overlap:
+        errors.append(f"Muscles cannot be both primary and secondary: {', '.join(sorted(overlap))}")
+    if errors:
+        return errors
+    return {
+        "name": name.strip(),
+        "primary_muscles": primary,
+        "secondary_muscles": secondary,
+        "equipment": equipment,
+        "difficulty": difficulty,
+    }
+
+
+def _admin_add_form(token: str) -> None:
+    with st.form("admin_add"):
+        fields = _exercise_form_fields("add")
+        submitted = st.form_submit_button("Add exercise", type="primary")
     if not submitted:
         return
-
-    payload = build_plan_payload(
-        goal=goal,
-        experience=experience,
-        days_per_week=days_per_week,
-        session_minutes=session_minutes,
-        available_equipment=available_equipment,
-        target_muscles=target_muscles,
-        avoid_exercise_ids=resolve_avoid_ids(avoid_names, catalog),
-    )
-
+    result = _build_exercise_payload(*fields)
+    if isinstance(result, list):
+        for err in result:
+            st.warning(err)
+        return
     try:
-        plan = request_plan(payload, token)
-    except BackendUnavailableError:
-        st.error("Cannot reach the coach service. Is it running on port 8001?")
-        return
-    except ValueError as exc:
-        st.error(f"Coach error: {exc}")
-        return
+        create_exercise(result, token=token)
+        st.success(f'Added "{result["name"]}".')
+        st.session_state["exercises"] = _load_exercises()
+    except (BackendUnavailableError, ValueError) as exc:
+        st.error(str(exc))
 
-    badge = "🤖 LLM" if plan.get("generated_by") == "llm" else "⚙️ Fallback"
-    st.caption(f"Plan generated by: {badge}")
-    for insight in plan.get("insights", []):
-        st.info(insight)
 
-    for index, day in enumerate(plan.get("days", []), start=1):
-        st.subheader(f"Day {index} — {day.get('focus', 'Workout')}")
-        rows = plan_day_rows(day)
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    if plan.get("notes"):
-        st.caption(plan["notes"])
+def _admin_edit_form(token: str, exercises: list[dict]) -> None:
+    if not exercises:
+        st.info("No exercises to edit yet.")
+        return
+    labels = {f'#{ex["id"]} · {ex["name"]}': ex for ex in exercises if "id" in ex}
+    choice = st.selectbox("Select exercise", list(labels), key="edit_choice")
+    target = labels[choice]
+    with st.form("admin_edit"):
+        fields = _exercise_form_fields("edit", target)
+        submitted = st.form_submit_button("Save changes", type="primary")
+    if not submitted:
+        return
+    result = _build_exercise_payload(*fields)
+    if isinstance(result, list):
+        for err in result:
+            st.warning(err)
+        return
+    try:
+        update_exercise(target["id"], result, token=token)
+        st.success(f'Updated "{result["name"]}".')
+        st.session_state["exercises"] = _load_exercises()
+    except (BackendUnavailableError, ValueError) as exc:
+        st.error(str(exc))
+
+
+def _admin_delete_form(token: str, exercises: list[dict]) -> None:
+    if not exercises:
+        st.info("No exercises to delete.")
+        return
+    labels = {f'#{ex["id"]} · {ex["name"]}': ex for ex in exercises if "id" in ex}
+    choice = st.selectbox("Select exercise", list(labels), key="delete_choice")
+    if st.button("Delete exercise", type="primary"):
+        try:
+            delete_exercise(labels[choice]["id"], token=token)
+            st.success("Exercise deleted.")
+            st.session_state["exercises"] = _load_exercises()
+            st.rerun()
+        except (BackendUnavailableError, ValueError) as exc:
+            st.error(str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# Shell
+# --------------------------------------------------------------------------- #
+def _sidebar_nav(user: dict, provider: str) -> str:
+    with st.sidebar:
+        _md(
+            f'<div class="tf-card" style="margin-bottom:14px">'
+            f'<div class="tf-metric-label">Signed in</div>'
+            f'<div style="font-weight:600;font-size:1.05rem">{user["username"]}</div>'
+            f'<div style="margin-top:6px">{ui.badge(user.get("role", "athlete"), "status-ok")}'
+            f'{ui.provider_badge(provider)}</div></div>'
+        )
+        pages = ["Dashboard", "AI Coach", "Exercise Catalog", "Workout History"]
+        if is_admin(user):
+            pages.append("Admin Catalog")
+        current = st.session_state.get("page", "Dashboard")
+        index = pages.index(current) if current in pages else 0
+        page = st.radio("Navigate", pages, index=index, label_visibility="collapsed")
+        st.session_state["page"] = page
+        st.divider()
+        if st.button("Log out", use_container_width=True):
+            for key in ("token", "username", "user", "last_plan"):
+                st.session_state.pop(key, None)
+            st.rerun()
+    return page
 
 
 def main() -> None:
-    st.set_page_config(page_title="TrainFlow", layout="wide")
-    st.title("TrainFlow — Coach")
+    st.set_page_config(page_title="TrainFlow", page_icon="⚡", layout="wide")
+    _md(ui.styles())
 
     if "exercises" not in st.session_state:
         st.session_state["exercises"] = _load_exercises()
 
     user = st.session_state.get("user")
+    if not st.session_state.get("token") or not user:
+        _auth_screen()
+        return
 
-    with st.sidebar:
-        _auth_sidebar()
-        st.divider()
-        st.header("Filters")
-        selected_muscles = st.multiselect("Muscle Group", _MUSCLE_GROUPS)
-        selected_equipment = st.multiselect("Equipment", _EQUIPMENT)
-        selected_difficulties = st.multiselect("Difficulty", _DIFFICULTIES)
-        if st.button("Refresh"):
-            st.session_state["exercises"] = _load_exercises()
+    provider = coach_status()
+    page = _sidebar_nav(user, provider)
 
-    filters = {
-        "muscles": selected_muscles,
-        "equipment": selected_equipment,
-        "difficulties": selected_difficulties,
-    }
+    meta = ui.badge(f"{user['username']} · {user.get('role', 'athlete')}", "status-ok") + ui.provider_badge(provider)
+    _md(ui.hero("TrainFlow Coach", _TAGLINE, meta))
+    st.write("")
 
-    # Catalog management is admin-only; athletes never see the tab.
-    tab_labels = ["Browse Exercises", "Coach", "History"]
-    if can_manage_catalog(user):
-        tab_labels.insert(1, "Add Exercise")
-    tabs = dict(zip(tab_labels, st.tabs(tab_labels)))
-
-    with tabs["Browse Exercises"]:
-        _browse_tab(st.session_state["exercises"], filters)
-    if "Add Exercise" in tabs:
-        with tabs["Add Exercise"]:
-            _add_tab()
-    with tabs["Coach"]:
-        _coach_tab(st.session_state["exercises"])
-    with tabs["History"]:
-        _history_tab(st.session_state["exercises"])
+    if page == "Dashboard":
+        _page_dashboard(user, provider)
+    elif page == "AI Coach":
+        _page_coach(user, provider)
+    elif page == "Exercise Catalog":
+        _page_catalog()
+    elif page == "Workout History":
+        _page_history(user)
+    elif page == "Admin Catalog" and is_admin(user):
+        _page_admin()
 
 
 if __name__ == "__main__":

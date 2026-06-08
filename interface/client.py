@@ -81,6 +81,37 @@ def create_exercise(data: dict, token: str | None = None) -> dict:
     return response.json()
 
 
+def update_exercise(exercise_id: int, data: dict, token: str | None = None) -> dict:
+    try:
+        response = httpx.put(
+            f"{_BASE_URL}/exercises/{exercise_id}",
+            json=data,
+            headers=_auth_headers(token),
+            timeout=5.0,
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise BackendUnavailableError("Cannot connect to the backend") from exc
+    if not response.is_success:
+        detail = response.json().get("detail", "Unknown error")
+        raise ValueError(detail if isinstance(detail, str) else str(detail))
+    return response.json()
+
+
+def delete_exercise(exercise_id: int, token: str | None = None) -> None:
+    try:
+        response = httpx.delete(
+            f"{_BASE_URL}/exercises/{exercise_id}",
+            headers=_auth_headers(token),
+            timeout=5.0,
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise BackendUnavailableError("Cannot connect to the backend") from exc
+    if response.status_code == 204:
+        return
+    detail = response.json().get("detail", "Unknown error") if response.content else "Delete failed"
+    raise ValueError(detail if isinstance(detail, str) else str(detail))
+
+
 def list_sessions(token: str, limit: int = 5) -> list[dict]:
     try:
         response = httpx.get(
@@ -110,6 +141,17 @@ def log_session(payload: dict, token: str) -> dict:
         detail = response.json().get("detail", "Unknown error")
         raise ValueError(detail if isinstance(detail, str) else str(detail))
     return response.json()
+
+
+def coach_status() -> str:
+    """Return the coach provider (gemini | anthropic | fallback | unavailable)."""
+    try:
+        response = httpx.get(f"{_COACH_URL}/health", timeout=5.0)
+    except (httpx.ConnectError, httpx.TimeoutException):
+        return "unavailable"
+    if response.is_success:
+        return response.json().get("provider", "unknown")
+    return "unavailable"
 
 
 def request_plan(payload: dict, token: str) -> dict:

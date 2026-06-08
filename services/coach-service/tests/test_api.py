@@ -49,11 +49,13 @@ def patched_exercise_client(monkeypatch, catalog):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
 
-def test_health_reports_planner(client, monkeypatch):
+def test_health_reports_provider(client, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("COACH_PROVIDER", raising=False)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "planner": "fallback"}
+    assert response.json() == {"status": "ok", "provider": "fallback"}
 
 
 def test_plan_requires_auth(client):

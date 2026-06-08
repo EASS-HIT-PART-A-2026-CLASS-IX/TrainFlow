@@ -39,15 +39,17 @@ Demo logins: `admin` / `admin123` (full access), `athlete` / `athlete123`
 
 ## 3. Use it
 
-1. Open the interface. In the sidebar, **Register** a new athlete account
-   (username + password), or log in. The demo `athlete` / `athlete123` and
-   `admin` / `admin123` accounts also work.
-2. **Coach** tab → choose a goal/schedule → **Generate plan**. The plan is
-   personalized from your workout history and shows whether it came from the LLM
-   or the fallback planner.
-3. **History** tab → log and view your own sessions. Athletes see only their own
-   history; admins see everyone's. The **Add Exercise** tab only appears for
-   admins.
+1. Open the interface. On the polished sign-in screen, **Register** a new athlete
+   account (username + password) or log in. The demo `athlete` / `athlete123` and
+   `admin` / `admin123` accounts also work. After login you land on the
+   **Dashboard**.
+2. Use the **sidebar navigation** (Dashboard · AI Coach · Exercise Catalog ·
+   Workout History · Admin Catalog for admins). On **AI Coach**, set a
+   goal/schedule → **Generate plan**; the plan renders as day cards with a coach
+   mode indicator (Gemini / Anthropic / built-in fallback).
+3. **Workout History** → log and view your own sessions. Athletes see only their
+   own; admins see everyone's. **Admin Catalog** (add/edit/delete exercises) is
+   visible to admins only.
 
 ## 4. Optional — free cloud LLM (Gemini)
 

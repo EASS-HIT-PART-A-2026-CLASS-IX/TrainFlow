@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth import require_coach
 from app.exercise_client import ExerciseClient, ExerciseServiceError
 from app.planner.context import build_context
-from app.planner.factory import get_planner
+from app.planner.factory import active_provider, get_planner
 from app.schemas import PlanRequest, WorkoutPlan
 
 router = APIRouter(tags=["coach"])
@@ -11,7 +11,7 @@ router = APIRouter(tags=["coach"])
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "planner": get_planner().name}
+    return {"status": "ok", "provider": active_provider()}
 
 
 @router.post("/plan", response_model=WorkoutPlan)

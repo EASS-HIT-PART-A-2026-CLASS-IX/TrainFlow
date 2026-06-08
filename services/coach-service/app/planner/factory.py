@@ -31,6 +31,12 @@ def _provider() -> str:
     return "fallback"
 
 
+def active_provider() -> str:
+    """The provider that get_planner() would use right now: gemini | anthropic |
+    fallback. Surfaced via /health so the UI can show the coach mode."""
+    return _provider()
+
+
 def get_planner() -> Planner:
     requested = os.getenv("COACH_PROVIDER", "auto").lower()
     provider = _provider()
