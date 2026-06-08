@@ -92,8 +92,35 @@ sessions on startup.
   GET stays public (EX1 behavior preserved).
 - **Cross-service** — the coach verifies the same JWT and requires `coach:use`.
 
+### Registration & roles
+
+- **`POST /auth/register`** (username + password) creates an **athlete** account.
+  Role and scopes are forced server-side — clients cannot self-register as admin
+  even if they smuggle a `role`/`scopes` field. Passwords are validated by a
+  single backend rule (`validate_password_strength`, min 8 chars) and stored
+  hashed; usernames must be unique (`409` on conflict). The UI auto-logs-in after
+  a successful registration.
+- **Admin** is **seeded only** (`admin` / `admin123`); there is no UI path to
+  create one. A demo `athlete` / `athlete123` is also seeded.
+- **Role capabilities:**
+
+  | | athlete | admin |
+  |---|---|---|
+  | log in / browse exercises / generate plans | ✓ | ✓ |
+  | create + view **own** workout history | ✓ | ✓ |
+  | create / update / delete exercises | ✗ (403) | ✓ |
+  | view **all** workout history | ✗ | ✓ |
+
+- **Per-user history ownership** — each `WorkoutSession` records an `owner`
+  (the JWT subject). `GET /sessions` returns only the caller's sessions for
+  athletes and everyone's for admins; reading or deleting another user's session
+  returns `404`. The backend is authoritative; the Streamlit UI additionally
+  hides admin-only controls (the **Add Exercise** tab renders only when the token
+  carries `exercises:write`).
+
 Tested: hashing, login, **expired token → 401**, **missing scope → 403**, role
-enforcement, and history-scope enforcement.
+enforcement, registration (athlete-only, duplicate `409`, weak password `422`,
+no self-admin), and per-user history isolation (athlete sees own, admin sees all).
 
 ## Workout history & personalization
 
@@ -177,8 +204,8 @@ modes. Its tests use **fakeredis** and are marked `@pytest.mark.anyio`.
 ## Running the tests
 
 ```bash
-cd services/exercise-service && uv run pytest      # 30 tests
-cd services/coach-service    && uv run pytest      # 19 tests
-cd scripts                   && uv run pytest      # 7 tests (anyio)
-cd interface                 && uv run pytest      # 23 tests
+cd services/exercise-service && uv run pytest      # catalog, auth, registration, history ownership
+cd services/coach-service    && uv run pytest      # planner, context, providers, validation, auth
+cd scripts                   && uv run pytest      # refresh worker (anyio + fakeredis)
+cd interface                 && uv run pytest      # filters, export, coach + permissions helpers
 ```

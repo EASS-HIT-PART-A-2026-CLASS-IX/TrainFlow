@@ -110,3 +110,68 @@ def test_history_requires_read_scope(client, admin_token):
 
     assert response.status_code == 403
     assert "history:read" in response.json()["detail"]
+
+
+# --- Per-user ownership -----------------------------------------------------
+
+def _register_login(client, username):
+    client.post("/auth/register", json={"username": username, "password": "password123"})
+    return client.post(
+        "/auth/token", data={"username": username, "password": "password123"}
+    ).json()["access_token"]
+
+
+def _h(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _athlete_session_payload(exercise_id):
+    return {
+        "date": "2026-06-07",
+        "goal": "general",
+        "exercises": [{"exercise_id": exercise_id, "sets": 3, "reps": 10}],
+    }
+
+
+def test_athlete_sees_only_own_history(auth_client, client):
+    # An exercise to reference (admin creates it via auth_client; same engine).
+    exercise_id = _create_exercise(auth_client)
+
+    alice = _register_login(client, "alice")
+    bob = _register_login(client, "bob")
+
+    created = client.post(
+        "/sessions", json=_athlete_session_payload(exercise_id), headers=_h(alice)
+    ).json()
+
+    # Alice sees her session; Bob sees none of it.
+    alice_list = client.get("/sessions", headers=_h(alice)).json()
+    bob_list = client.get("/sessions", headers=_h(bob)).json()
+    assert [s["id"] for s in alice_list] == [created["id"]]
+    assert created["id"] not in [s["id"] for s in bob_list]
+    assert alice_list[0]["owner"] == "alice"
+
+
+def test_admin_sees_all_history(auth_client, client, admin_token):
+    exercise_id = _create_exercise(auth_client)
+    alice = _register_login(client, "alice")
+    created = client.post(
+        "/sessions", json=_athlete_session_payload(exercise_id), headers=_h(alice)
+    ).json()
+
+    admin_list = client.get("/sessions", headers=_h(admin_token)).json()
+    assert created["id"] in [s["id"] for s in admin_list]
+
+
+def test_athlete_cannot_read_or_delete_others_session(auth_client, client):
+    exercise_id = _create_exercise(auth_client)
+    alice = _register_login(client, "alice")
+    bob = _register_login(client, "bob")
+    created = client.post(
+        "/sessions", json=_athlete_session_payload(exercise_id), headers=_h(alice)
+    ).json()
+
+    assert client.get(f"/sessions/{created['id']}", headers=_h(bob)).status_code == 404
+    assert client.delete(f"/sessions/{created['id']}", headers=_h(bob)).status_code == 404
+    # The owner can still delete it.
+    assert client.delete(f"/sessions/{created['id']}", headers=_h(alice)).status_code == 204

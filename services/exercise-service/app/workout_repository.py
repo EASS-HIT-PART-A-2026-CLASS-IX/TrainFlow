@@ -38,14 +38,17 @@ class WorkoutRepository:
             )
         return WorkoutSessionRead(
             id=row.id,
+            owner=row.owner,
             date=row.date,
             goal=row.goal,
             notes=row.notes,
             exercises=exercises,
         )
 
-    def create_session(self, data: WorkoutSessionInput) -> WorkoutSessionRead:
-        session_row = WorkoutSession(date=data.date, goal=data.goal.value, notes=data.notes)
+    def create_session(self, data: WorkoutSessionInput, owner: str | None = None) -> WorkoutSessionRead:
+        session_row = WorkoutSession(
+            owner=owner, date=data.date, goal=data.goal.value, notes=data.notes
+        )
         self._session.add(session_row)
         self._session.flush()
         for item in data.exercises:
@@ -62,21 +65,29 @@ class WorkoutRepository:
         self._session.refresh(session_row)
         return self._to_read(session_row)
 
-    def list_sessions(self, limit: int = 10) -> list[WorkoutSessionRead]:
-        rows = self._session.exec(
-            select(WorkoutSession)
-            .order_by(WorkoutSession.date.desc(), WorkoutSession.id.desc())
-            .limit(limit)
-        ).all()
+    def list_sessions(self, limit: int = 10, owner: str | None = None) -> list[WorkoutSessionRead]:
+        statement = select(WorkoutSession)
+        if owner is not None:
+            statement = statement.where(WorkoutSession.owner == owner)
+        statement = statement.order_by(
+            WorkoutSession.date.desc(), WorkoutSession.id.desc()
+        ).limit(limit)
+        rows = self._session.exec(statement).all()
         return [self._to_read(row) for row in rows]
 
-    def get_session(self, session_id: int) -> WorkoutSessionRead | None:
-        row = self._session.get(WorkoutSession, session_id)
-        return self._to_read(row) if row is not None else None
-
-    def delete_session(self, session_id: int) -> bool:
+    def get_session(self, session_id: int, owner: str | None = None) -> WorkoutSessionRead | None:
         row = self._session.get(WorkoutSession, session_id)
         if row is None:
+            return None
+        if owner is not None and row.owner != owner:
+            return None  # not the caller's session — hide its existence
+        return self._to_read(row)
+
+    def delete_session(self, session_id: int, owner: str | None = None) -> bool:
+        row = self._session.get(WorkoutSession, session_id)
+        if row is None:
+            return False
+        if owner is not None and row.owner != owner:
             return False
         children = self._session.exec(
             select(WorkoutExercise).where(WorkoutExercise.session_id == session_id)

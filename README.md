@@ -13,7 +13,16 @@ cp .env.example .env
 docker compose up --build
 ```
 
-Then open the interface at `http://localhost:8501`, log in as `athlete` / `athlete123`, and use the **Coach** tab. Full details: [`docs/EX3-notes.md`](docs/EX3-notes.md) and the runbook [`docs/runbooks/compose.md`](docs/runbooks/compose.md). A scripted end-to-end demo lives at [`scripts/demo.sh`](scripts/demo.sh).
+Then open the interface at `http://localhost:8501`. Use the sidebar to **Register** a new athlete account (or log in), then try the **Coach** tab. Full details: [`docs/EX3-notes.md`](docs/EX3-notes.md) and the runbook [`docs/runbooks/compose.md`](docs/runbooks/compose.md). A scripted end-to-end demo lives at [`scripts/demo.sh`](scripts/demo.sh).
+
+### Accounts & roles
+
+| Account | How to get it | Role | Can |
+|---|---|---|---|
+| **admin** | seeded: `admin` / `admin123` | admin | everything an athlete can, **plus** create/update/delete exercises and view all workout history |
+| **athlete** | **self-register** in the UI (Register screen) | athlete | log in, browse exercises, generate coach plans, and create/view **their own** workout history |
+
+Athletes **cannot** manage the exercise catalog or other users — those controls are hidden in the UI and rejected by the backend (the backend is authoritative). Self-registration always creates an athlete; admin is seeded only. A demo `athlete` / `athlete123` account is also seeded for convenience.
 
 The EX1/EX2 backend now uses **SQLite/SQLModel** persistence and **JWT auth** (hashed credentials, scoped writes). The sections below describe the original EX1/EX2 single-service workflow, which still applies.
 

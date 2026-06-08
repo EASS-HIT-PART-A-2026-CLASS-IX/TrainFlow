@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session
 
-from app.auth import get_current_user
+from app.auth import is_admin, require_history_read, require_history_write
 from app.db import get_session
-from app.models import WorkoutSessionInput, WorkoutSessionRead
+from app.models import UserTable, WorkoutSessionInput, WorkoutSessionRead
 from app.workout_repository import WorkoutRepository
 
 router = APIRouter(prefix="/sessions", tags=["history"])
@@ -14,14 +14,19 @@ def get_workout_repository(session: Session = Depends(get_session)) -> WorkoutRe
     return WorkoutRepository(session)
 
 
+def _owner_filter(user: UserTable) -> str | None:
+    """Admins see everyone's history (None = no filter); athletes see only their own."""
+    return None if is_admin(user) else user.username
+
+
 @router.post(
     "",
     response_model=WorkoutSessionRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Security(get_current_user, scopes=["history:write"])],
 )
 def create_session(
     data: WorkoutSessionInput,
+    user: UserTable = Depends(require_history_write),
     repository: WorkoutRepository = Depends(get_workout_repository),
 ) -> WorkoutSessionRead:
     unknown = sorted(
@@ -32,45 +37,36 @@ def create_session(
             status_code=422,
             detail=f"Unknown exercise_id(s) not in catalog: {unknown}",
         )
-    return repository.create_session(data)
+    return repository.create_session(data, owner=user.username)
 
 
-@router.get(
-    "",
-    response_model=list[WorkoutSessionRead],
-    dependencies=[Security(get_current_user, scopes=["history:read"])],
-)
+@router.get("", response_model=list[WorkoutSessionRead])
 def list_sessions(
     limit: int = Query(default=10, ge=1, le=100),
+    user: UserTable = Depends(require_history_read),
     repository: WorkoutRepository = Depends(get_workout_repository),
 ) -> list[WorkoutSessionRead]:
-    return repository.list_sessions(limit)
+    return repository.list_sessions(limit, owner=_owner_filter(user))
 
 
-@router.get(
-    "/{session_id}",
-    response_model=WorkoutSessionRead,
-    dependencies=[Security(get_current_user, scopes=["history:read"])],
-)
+@router.get("/{session_id}", response_model=WorkoutSessionRead)
 def get_session_by_id(
     session_id: int,
+    user: UserTable = Depends(require_history_read),
     repository: WorkoutRepository = Depends(get_workout_repository),
 ) -> WorkoutSessionRead:
-    session = repository.get_session(session_id)
+    session = repository.get_session(session_id, owner=_owner_filter(user))
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_FOUND_DETAIL)
     return session
 
 
-@router.delete(
-    "/{session_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Security(get_current_user, scopes=["history:write"])],
-)
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_session(
     session_id: int,
+    user: UserTable = Depends(require_history_write),
     repository: WorkoutRepository = Depends(get_workout_repository),
 ) -> Response:
-    if not repository.delete_session(session_id):
+    if not repository.delete_session(session_id, owner=_owner_filter(user)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=NOT_FOUND_DETAIL)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

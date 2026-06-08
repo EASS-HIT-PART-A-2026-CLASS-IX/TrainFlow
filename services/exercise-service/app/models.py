@@ -108,6 +108,7 @@ class WorkoutSession(SQLModel, table=True):
     __tablename__ = "workoutsession"
 
     id: int | None = SQLField(default=None, primary_key=True)
+    owner: str | None = SQLField(default=None, index=True)
     date: date
     goal: str
     notes: str | None = None
@@ -148,6 +149,7 @@ class WorkoutSessionInput(BaseModel):
 
 class WorkoutSessionRead(BaseModel):
     id: int
+    owner: str | None = None
     date: date
     goal: Goal
     notes: str | None = None
@@ -161,6 +163,21 @@ class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     scopes: list[str] = Field(default_factory=list)
+
+
+class UserRegister(BaseModel):
+    # Only username + password are accepted. Role/scopes are NOT client-settable;
+    # registrations are always athletes (see auth_routes).
+    username: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("username cannot be empty")
+        return cleaned
 
 
 class UserRead(BaseModel):

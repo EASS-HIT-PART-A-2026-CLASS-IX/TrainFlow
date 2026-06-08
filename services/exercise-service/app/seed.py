@@ -2,11 +2,11 @@ from datetime import date, timedelta
 
 from sqlmodel import Session, select
 
-from app.auth import hash_password
+from app.auth import ALL_SCOPES, ATHLETE_SCOPES, hash_password
 from app.models import ExerciseTable, UserTable, WorkoutExercise, WorkoutSession
 
-ALL_SCOPES = ["exercises:write", "history:read", "history:write", "coach:use"]
-ATHLETE_SCOPES = ["history:read", "history:write", "coach:use"]
+# Re-exported for callers/tests that import scope lists from app.seed.
+__all__ = ["ALL_SCOPES", "ATHLETE_SCOPES", "seed_all", "seed_users", "seed_exercises", "seed_sessions"]
 
 _DEMO_USERS = [
     {
@@ -210,6 +210,7 @@ def seed_sessions(session: Session) -> None:
     today = date.today()
     for spec in _DEMO_SESSIONS:
         workout = WorkoutSession(
+            owner="athlete",
             date=today - timedelta(days=spec["days_ago"]),
             goal=spec["goal"],
             notes=spec["notes"],

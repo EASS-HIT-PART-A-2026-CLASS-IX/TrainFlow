@@ -21,7 +21,20 @@ SCOPES = {
     "coach:use": "Request AI-generated workout plans",
 }
 
+# Role -> scope mapping. New self-registrations are always athletes; admin is
+# seeded only. The backend is the sole authority for these grants.
+ALL_SCOPES = ["exercises:write", "history:read", "history:write", "coach:use"]
+ATHLETE_SCOPES = ["history:read", "history:write", "coach:use"]
+
+MIN_PASSWORD_LENGTH = 8
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token", scopes=SCOPES, auto_error=True)
+
+
+def validate_password_strength(password: str) -> None:
+    """Single source of truth for password rules, enforced server-side."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ValueError(f"Password must be at least {MIN_PASSWORD_LENGTH} characters long")
 
 
 def hash_password(password: str) -> str:
@@ -94,3 +107,13 @@ def require_scopes(*scopes: str):
         return user
 
     return dependency
+
+
+def is_admin(user: UserTable) -> bool:
+    return user.role == "admin"
+
+
+# Reusable history dependencies that also hand the route the resolved user, so
+# routes can enforce per-user ownership (athlete sees own; admin sees all).
+require_history_read = require_scopes("history:read")
+require_history_write = require_scopes("history:write")

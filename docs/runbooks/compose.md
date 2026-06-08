@@ -39,10 +39,15 @@ Demo logins: `admin` / `admin123` (full access), `athlete` / `athlete123`
 
 ## 3. Use it
 
-1. Open the interface, log in as `athlete`.
+1. Open the interface. In the sidebar, **Register** a new athlete account
+   (username + password), or log in. The demo `athlete` / `athlete123` and
+   `admin` / `admin123` accounts also work.
 2. **Coach** tab → choose a goal/schedule → **Generate plan**. The plan is
-   personalized from the seeded chest-heavy history and shows whether it came
-   from the LLM or the fallback planner.
+   personalized from your workout history and shows whether it came from the LLM
+   or the fallback planner.
+3. **History** tab → log and view your own sessions. Athletes see only their own
+   history; admins see everyone's. The **Add Exercise** tab only appears for
+   admins.
 
 ## 4. Optional — free cloud LLM (Gemini)
 

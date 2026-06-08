@@ -29,6 +29,16 @@ for url in "$EXERCISE_URL/" "$COACH_URL/health"; do
   done
 done
 
+hr "Registration: self-register a new athlete (expect 201, then 409 on duplicate)"
+curl -s -o /dev/null -w "register new athlete -> %{http_code}\n" \
+  -X POST "$EXERCISE_URL/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo_athlete","password":"password123"}'
+curl -s -o /dev/null -w "register duplicate    -> %{http_code}\n" \
+  -X POST "$EXERCISE_URL/auth/register" \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo_athlete","password":"password123"}'
+
 hr "Auth: athlete logs in (history + coach scopes)"
 ATHLETE_TOKEN=$(curl -sf -X POST "$EXERCISE_URL/auth/token" \
   -d "username=athlete&password=athlete123" | json "['access_token']")

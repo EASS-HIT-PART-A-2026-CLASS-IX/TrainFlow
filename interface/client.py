@@ -29,6 +29,33 @@ def login(username: str, password: str) -> str:
     raise ValueError("Incorrect username or password")
 
 
+def register(username: str, password: str) -> dict:
+    """Create a new athlete account, or raise ValueError with the backend's
+    message (e.g. username taken, weak password)."""
+    try:
+        response = httpx.post(
+            f"{_BASE_URL}/auth/register",
+            json={"username": username, "password": password},
+            timeout=5.0,
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise BackendUnavailableError("Cannot connect to the backend") from exc
+    if response.is_success:
+        return response.json()
+    detail = response.json().get("detail", "Registration failed")
+    raise ValueError(detail if isinstance(detail, str) else str(detail))
+
+
+def get_me(token: str) -> dict:
+    """Return the current user's profile ({username, role, scopes})."""
+    try:
+        response = httpx.get(f"{_BASE_URL}/auth/me", headers=_auth_headers(token), timeout=5.0)
+        response.raise_for_status()
+        return response.json()
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise BackendUnavailableError("Cannot connect to the backend") from exc
+
+
 def list_exercises() -> list[dict]:
     try:
         response = httpx.get(f"{_BASE_URL}/exercises", timeout=5.0)
@@ -66,6 +93,22 @@ def list_sessions(token: str, limit: int = 5) -> list[dict]:
         raise BackendUnavailableError("Cannot connect to the backend") from exc
     if not response.is_success:
         return []
+    return response.json()
+
+
+def log_session(payload: dict, token: str) -> dict:
+    try:
+        response = httpx.post(
+            f"{_BASE_URL}/sessions",
+            json=payload,
+            headers=_auth_headers(token),
+            timeout=5.0,
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise BackendUnavailableError("Cannot connect to the backend") from exc
+    if not response.is_success:
+        detail = response.json().get("detail", "Unknown error")
+        raise ValueError(detail if isinstance(detail, str) else str(detail))
     return response.json()
 
 
