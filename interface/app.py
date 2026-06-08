@@ -55,7 +55,12 @@ def _sign_in(token: str, username: str) -> None:
     except BackendUnavailableError:
         st.session_state["user"] = {"username": username, "role": "athlete", "scopes": []}
     st.session_state["exercises"] = _load_exercises()
-    st.session_state["page"] = "Dashboard"
+    st.session_state["nav"] = "Dashboard"
+
+
+def _goto(page: str) -> None:
+    """Navigation callback — safe to set the nav widget's state here."""
+    st.session_state["nav"] = page
 
 
 def _catalog() -> list[dict]:
@@ -73,10 +78,10 @@ def _grid(html_items: list[str], cols: int = 3) -> None:
 # Auth screen (unauthenticated)
 # --------------------------------------------------------------------------- #
 def _auth_screen() -> None:
-    _md(ui.hero("TrainFlow Coach", _TAGLINE))
-    st.write("")
-    left, mid, right = st.columns([1, 1.6, 1])
+    left, mid, right = st.columns([1, 1.4, 1])
     with mid:
+        _md(ui.hero("TrainFlow Coach", _TAGLINE, center=True))
+        st.write("")
         with st.container(border=True):
             mode = st.radio(
                 "Mode", ["Log in", "Register"], horizontal=True, label_visibility="collapsed"
@@ -92,7 +97,7 @@ def _login_form() -> None:
         st.caption("Demo admin: admin / admin123")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Log in", use_container_width=True)
+        submitted = st.form_submit_button("Log in", width="stretch")
     if submitted:
         try:
             _sign_in(login(username, password), username)
@@ -109,7 +114,7 @@ def _register_form() -> None:
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         confirm = st.text_input("Confirm password", type="password")
-        submitted = st.form_submit_button("Create account", use_container_width=True)
+        submitted = st.form_submit_button("Create account", width="stretch")
     if not submitted:
         return
     if not username.strip():
@@ -141,13 +146,13 @@ def _page_dashboard(user: dict, provider: str) -> None:
         sessions = []
 
     m = compute_dashboard_metrics(exercises, sessions)
-    focus = ", ".join(m["top_focus"]) if m["top_focus"] else "—"
+    more_focus = max(0, m["focus_total"] - len(m["top_focus"]))
 
     cards = [
         ui.metric_card("Exercises", m["total_exercises"], "in catalog", accent=True),
         ui.metric_card("Workout sessions", m["total_sessions"], history_scope_label(user)),
         ui.metric_card("Equipment types", m["equipment_types"], "available"),
-        ui.metric_card("Recent focus", focus or "—", "from your history"),
+        ui.metric_chip_card("Recent focus", m["top_focus"], more_focus, "from your history"),
         ui.metric_card("Coach", ui.provider_label(provider), "active mode"),
     ]
     _grid(cards, cols=5)
@@ -157,9 +162,7 @@ def _page_dashboard(user: dict, provider: str) -> None:
         '<div class="tf-panel"><b>Ready to train?</b> &nbsp;Generate a structured, '
         "history-aware plan from your catalog in seconds.</div>"
     )
-    if st.button("Start with Coach", type="primary"):
-        st.session_state["page"] = "AI Coach"
-        st.rerun()
+    st.button("Start with Coach", type="primary", on_click=_goto, args=("AI Coach",))
 
 
 def _page_coach(user: dict, provider: str) -> None:
@@ -185,7 +188,7 @@ def _page_coach(user: dict, provider: str) -> None:
             avoid_names = st.multiselect(
                 "Avoid exercises (dislikes)", [ex["name"] for ex in catalog]
             )
-            submitted = st.form_submit_button("Generate plan", type="primary", use_container_width=True)
+            submitted = st.form_submit_button("Generate plan", type="primary", width="stretch")
 
     if submitted:
         payload = build_plan_payload(
@@ -452,12 +455,12 @@ def _sidebar_nav(user: dict, provider: str) -> str:
         pages = ["Dashboard", "AI Coach", "Exercise Catalog", "Workout History"]
         if is_admin(user):
             pages.append("Admin Catalog")
-        current = st.session_state.get("page", "Dashboard")
-        index = pages.index(current) if current in pages else 0
-        page = st.radio("Navigate", pages, index=index, label_visibility="collapsed")
-        st.session_state["page"] = page
+        # Keep the keyed nav state valid (e.g. after a role change/logout).
+        if st.session_state.get("nav") not in pages:
+            st.session_state["nav"] = "Dashboard"
+        page = st.radio("Navigation", pages, key="nav", label_visibility="collapsed")
         st.divider()
-        if st.button("Log out", use_container_width=True):
+        if st.button("Log out", width="stretch"):
             for key in ("token", "username", "user", "last_plan"):
                 st.session_state.pop(key, None)
             st.rerun()

@@ -22,4 +22,5 @@ def compute_dashboard_metrics(exercises: list[dict] | None, sessions: list[dict]
         "total_sessions": len(sessions),
         "equipment_types": len(equipment),
         "top_focus": [muscle for muscle, _ in focus.most_common(3)],
+        "focus_total": len(focus),  # distinct muscles trained recently
     }

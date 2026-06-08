@@ -24,6 +24,23 @@ def test_metric_card_renders_label_value_sub():
     assert "accent" in out
 
 
+def test_metric_chip_card_shows_chips_and_more():
+    out = ui.metric_chip_card("Recent focus", ["chest", "back"], more=2, sub="from history")
+    assert "chest" in out and "back" in out
+    assert "+2 more" in out
+    assert "tf-metric" in out  # same card shell -> consistent height
+
+
+def test_metric_chip_card_empty_shows_dash():
+    out = ui.metric_chip_card("Recent focus", [], more=0)
+    assert "—" in out
+
+
+def test_hero_center_adds_class():
+    assert "tf-hero-center" in ui.hero("T", "tag", center=True)
+    assert "tf-hero-center" not in ui.hero("T", "tag")
+
+
 def test_provider_label_mapping():
     assert ui.provider_label("gemini") == "Gemini"
     assert ui.provider_label("anthropic") == "Anthropic"

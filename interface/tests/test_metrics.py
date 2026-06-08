@@ -24,6 +24,17 @@ def test_top_focus_orders_by_frequency():
     assert m["top_focus"][0] == "chest"
 
 
+def test_focus_total_counts_distinct_muscles():
+    m = compute_dashboard_metrics(_CATALOG, _SESSIONS)
+    assert m["focus_total"] == 1  # only chest was trained
+
+
 def test_empty_inputs_are_safe():
     m = compute_dashboard_metrics(None, None)
-    assert m == {"total_exercises": 0, "total_sessions": 0, "equipment_types": 0, "top_focus": []}
+    assert m == {
+        "total_exercises": 0,
+        "total_sessions": 0,
+        "equipment_types": 0,
+        "top_focus": [],
+        "focus_total": 0,
+    }

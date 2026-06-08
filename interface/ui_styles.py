@@ -34,6 +34,9 @@ h1, h2, h3 {{ letter-spacing: -0.02em; }}
 .tf-hero h1 {{ margin: 0 0 6px 0; font-size: 1.9rem; }}
 .tf-hero .tf-tagline {{ color: #aeb7c2; font-size: 1.02rem; margin-bottom: 14px; }}
 .tf-hero .tf-meta {{ display: flex; gap: 10px; flex-wrap: wrap; }}
+.tf-hero-center {{ text-align: center; }}
+.tf-hero-center .tf-tagline {{ margin-left: auto; margin-right: auto; max-width: 520px; }}
+.tf-hero-center .tf-meta {{ justify-content: center; }}
 
 /* Generic card */
 .tf-card {{
@@ -43,20 +46,24 @@ h1, h2, h3 {{ letter-spacing: -0.02em; }}
   padding: 18px 20px;
 }}
 
-/* Metric cards */
+/* Metric cards — fixed min-height so all cards line up regardless of content */
 .tf-metric {{
   background: #141a22;
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 16px;
   padding: 18px 18px 16px;
   height: 100%;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
 }}
 .tf-metric .tf-metric-label {{
   color: #8b97a5; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
 }}
 .tf-metric .tf-metric-value {{ font-size: 2.1rem; font-weight: 700; line-height: 1.1; margin-top: 6px; }}
-.tf-metric .tf-metric-sub {{ color: #7f8b99; font-size: 0.82rem; margin-top: 4px; }}
+.tf-metric .tf-metric-sub {{ color: #7f8b99; font-size: 0.82rem; margin-top: auto; padding-top: 8px; }}
 .tf-metric .tf-metric-value.accent {{ color: var(--tf-accent); }}
+.tf-metric .tf-metric-chips {{ margin-top: 10px; line-height: 1.9; }}
 
 /* Pills / badges */
 .tf-badge {{
@@ -110,7 +117,23 @@ h1, h2, h3 {{ letter-spacing: -0.02em; }}
 .tf-empty .tf-empty-title {{ color: #cdd6e0; font-weight: 600; font-size: 1.05rem; margin-bottom: 6px; }}
 
 /* Buttons */
-.stButton > button, .stForm button[kind="primaryFormSubmit"] {{ border-radius: 10px; font-weight: 600; }}
+.stButton > button {{ border-radius: 10px; font-weight: 600; }}
+
+/* Primary / CTA buttons: dark text on bright green for strong contrast.
+   Scoped to primary buttons only so secondary buttons keep their default look. */
+button[kind="primary"], button[kind="primaryFormSubmit"],
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {{
+  background-color: var(--tf-accent) !important;
+  color: #06231b !important;
+  border: 1px solid var(--tf-accent) !important;
+  font-weight: 700 !important;
+}}
+button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover,
+[data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-primaryFormSubmit"]:hover {{
+  background-color: #00c98c !important;
+  color: #06231b !important;
+  border-color: #00c98c !important;
+}}
 </style>
 """
 
@@ -133,10 +156,11 @@ def badges(items, kind: str = "") -> str:
     return "".join(badge(item, kind) for item in (items or []))
 
 
-def hero(title: str, tagline: str, meta_html: str = "") -> str:
+def hero(title: str, tagline: str, meta_html: str = "", center: bool = False) -> str:
+    cls = "tf-hero tf-hero-center" if center else "tf-hero"
     meta = f'<div class="tf-meta">{meta_html}</div>' if meta_html else ""
     return (
-        f'<div class="tf-hero"><h1>{_esc(title)}</h1>'
+        f'<div class="{cls}"><h1>{_esc(title)}</h1>'
         f'<div class="tf-tagline">{_esc(tagline)}</div>{meta}</div>'
     )
 
@@ -147,6 +171,22 @@ def metric_card(label: str, value, sub: str = "", accent: bool = False) -> str:
     return (
         f'<div class="tf-metric"><div class="tf-metric-label">{_esc(label)}</div>'
         f'<div class="{value_cls}">{_esc(value)}</div>{sub_html}</div>'
+    )
+
+
+def metric_chip_card(label: str, chips: list[str], more: int = 0, sub: str = "") -> str:
+    """A metric card whose value is a compact row of badges (e.g. recent focus
+    muscles), keeping the same height as value-based cards."""
+    if chips:
+        chip_html = badges(chips, "muscle")
+        if more > 0:
+            chip_html += badge(f"+{more} more", "status-muted")
+    else:
+        chip_html = '<span class="tf-metric-sub">—</span>'
+    sub_html = f'<div class="tf-metric-sub">{_esc(sub)}</div>' if sub else ""
+    return (
+        f'<div class="tf-metric"><div class="tf-metric-label">{_esc(label)}</div>'
+        f'<div class="tf-metric-chips">{chip_html}</div>{sub_html}</div>'
     )
 
 
