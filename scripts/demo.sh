@@ -70,11 +70,26 @@ curl -s -o /dev/null -w "POST /sessions -> %{http_code}\n" \
        "exercises":[{"exercise_id":1,"sets":5,"reps":8,"weight":60}]}'
 
 hr "Coach: generate a personalized plan"
-curl -sf -X POST "$COACH_URL/plan" \
+PLAN=$(curl -sf -X POST "$COACH_URL/plan" \
   -H "Authorization: Bearer $ATHLETE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"goal":"hypertrophy","experience":"intermediate","days_per_week":3,"session_minutes":60}' \
-  | python3 -m json.tool | head -40
+  -d '{"goal":"hypertrophy","experience":"intermediate","days_per_week":3,"session_minutes":60}')
+echo "$PLAN" | python3 -m json.tool | head -30
+echo "generated_by: $(echo "$PLAN" | json "['generated_by']")"
+
+hr "Persistence: save the plan, then fetch it back (survives relogin)"
+# The Streamlit UI does this automatically; shown here over the API.
+SAVE_BODY=$(python3 -c "import sys,json; p=json.load(sys.stdin); print(json.dumps({'goal':p['goal'],'generated_by':p['generated_by'],'request':{},'plan':p}))" <<<"$PLAN")
+curl -s -o /dev/null -w "POST /plans -> %{http_code}\n" \
+  -X POST "$EXERCISE_URL/plans" \
+  -H "Authorization: Bearer $ATHLETE_TOKEN" \
+  -H "Content-Type: application/json" -d "$SAVE_BODY"
+# Re-login (new token) and confirm the latest plan is still there.
+ATHLETE_TOKEN2=$(curl -sf -X POST "$EXERCISE_URL/auth/token" \
+  -d "username=athlete&password=athlete123" | json "['access_token']")
+curl -s -o /dev/null -w "GET /plans/latest after relogin -> %{http_code}\n" \
+  "$EXERCISE_URL/plans/latest" -H "Authorization: Bearer $ATHLETE_TOKEN2"
+echo "(in the Streamlit UI: export the plan as PNG and 'Log Day N as a workout' from the Coach result)"
 
 hr "Refresh worker: idempotent Redis-backed job (run the same job twice)"
 docker compose run --rm refresh-worker \

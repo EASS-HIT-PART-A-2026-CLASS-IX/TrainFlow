@@ -122,6 +122,24 @@ Tested: hashing, login, **expired token → 401**, **missing scope → 403**, ro
 enforcement, registration (athlete-only, duplicate `409`, weak password `422`,
 no self-admin), and per-user history isolation (athlete sees own, admin sees all).
 
+### Secret / token rotation
+
+JWTs are signed with the shared `JWT_SECRET` (HS256), so rotating that secret
+invalidates every outstanding token. To rotate:
+
+1. Generate a new secret (≥ 32 bytes), e.g. `openssl rand -hex 32`.
+2. Update `JWT_SECRET` in `.env` (it must stay identical for both
+   exercise-service and coach-service — the coach verifies what the exercise
+   service signs).
+3. Restart both services: `docker compose up -d --build exercise-service coach-service`.
+4. All existing tokens now fail verification (`401`); users simply log in again
+   to obtain freshly-signed tokens. Tokens also expire on their own after 30
+   minutes (`ACCESS_TOKEN_EXPIRE_MINUTES`).
+
+To rotate an **LLM API key**, replace `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`)
+in `.env` and restart coach-service; revoke the old key in the provider console.
+Never commit `.env`.
+
 ## Workout history & personalization
 
 Two lightweight tables (`WorkoutSession`, `WorkoutExercise`) record what was
@@ -159,13 +177,21 @@ touching the planner or validation. `COACH_PROVIDER` selects it:
 | Provider | Cost | Notes |
 |---|---|---|
 | `auto` (default) | — | Gemini if `GEMINI_API_KEY` is set, else Anthropic if `ANTHROPIC_API_KEY` is set, else fallback |
-| `gemini` | **free cloud tier** | Google Gemini REST API (JSON mode); default `gemini-2.0-flash`; key from aistudio.google.com (no billing) |
-| `anthropic` | paid | `messages.parse` structured output; default `claude-opus-4-8` |
+| `gemini` | **free cloud tier** | Google Gemini REST API (JSON mode); default `gemini-2.5-flash`; key from aistudio.google.com (no billing) |
+| `anthropic` | paid (optional) | `messages.parse` structured output; default `claude-opus-4-8` |
 | `fallback` | free | Deterministic planner only |
 
 Because the catalog-only validation/repair layer runs regardless of provider, a
 smaller free model is safe — bad or hallucinated picks are dropped and topped up
 from the fallback.
+
+**Enabling real Gemini.** Set `COACH_PROVIDER=gemini`, `GEMINI_API_KEY=<key>`,
+`GEMINI_MODEL=gemini-2.5-flash` — in `.env` for compose, or `export`ed in the
+shell for a manual run — then **restart coach-service** (`docker compose up -d
+--build coach-service`). Without a key the coach silently uses the fallback
+planner. Anthropic remains optional via `ANTHROPIC_API_KEY`. The API key travels
+in the `x-goog-api-key` header (never in URLs/logs), `.env` is gitignored, and
+**tests never call a real LLM** — the `LLMClient` is injected and mocked.
 
 ### Plan persistence & export
 
@@ -189,6 +215,41 @@ with sets/reps/rest, reasons, and coach notes — no raw JSON).
 The worker (`scripts/refresh.py`) is async with **bounded concurrency**
 (`asyncio.Semaphore`), **retries with exponential backoff**, and `once`/`watch`
 modes. Its tests use **fakeredis** and are marked `@pytest.mark.anyio`.
+
+### Redis trace excerpt
+
+Enqueuing the same `job_id` twice and draining the queue once — the duplicate is
+a no-op (idempotency via `SET NX`), the work runs exactly once, and the result is
+cached in `coach:context:current`:
+
+```text
+$ python refresh.py once --enqueue --job-id refresh-2026-06-09
+drain result      : {'done': 1, 'skipped': 1}      # 2 jobs queued, 1 processed, 1 skipped
+fetch invocations : 1                               # catalog rebuilt exactly once
+idempotency key   : coach:refresh:done:refresh-2026-06-09 => 1   # SET NX claim
+cached context    : {"exercise_count": 16, "by_muscle": {"chest": 3, "back": 3},
+                     "by_equipment": {"barbell": 6}}
+```
+
+(Captured from `RefreshWorker.drain_once()` against a Redis backend; the
+`done:{job_id}` key is the idempotency guard and `coach:context:current` is the
+rebuilt snapshot the coach can read instead of hitting the catalog live.)
+
+## Demo flow
+
+`scripts/demo.sh` walks a grader through the full stack (or run the steps in the
+Streamlit UI):
+
+1. **Register / log in** — self-register an athlete, or use `admin` / `admin123`.
+2. **Generate a Coach plan** — AI Coach page → *Generate plan* (staged loading;
+   Gemini if configured, else the deterministic fallback).
+3. **Persistence across relogin** — log out and back in as the same user; the
+   latest plan (and its *Log Day* action) is re-fetched from `GET /plans/latest`.
+4. **Export the plan as PNG** — from the Coach result (TrainFlow header, goal,
+   provider, days, exercises, reasons, notes — no raw JSON).
+5. **Log a workout** — *Log Day N as a workout* pushes it into the user's history.
+6. **Refresh worker** — enqueue the same job twice and drain once to see the
+   idempotent no-op (see the trace excerpt above).
 
 ## Requirement checklist
 

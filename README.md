@@ -79,24 +79,45 @@ This repository is structured as the starting point of a larger TrainFlow monore
 
 By keeping the current implementation focused and well-structured, it can be easily integrated into a broader multi-service architecture.
 
-## Project Structure
+## Monorepo structure
 
-- `README.md` - TrainFlow repository overview
-- `docs/` - product and roadmap documentation
-- `services/exercise-service/` - FastAPI Exercise Catalog backend (EX1)
-  - `app/main.py` - FastAPI application entry point
-  - `app/models.py` - Pydantic models and enums
-  - `app/repository.py` - in-memory repository for exercises
-  - `app/routes.py` - API routes for CRUD operations
-  - `tests/test_exercises.py` - pytest test suite
-  - `pyproject.toml` - Exercise service dependencies
-- `interface/` - Streamlit interface (EX2)
-  - `app.py` - Streamlit entrypoint
-  - `client.py` - HTTP client wrapping the backend
-  - `filters.py` - client-side filter logic
-  - `export.py` - PNG reference sheet generation
-  - `tests/` - pytest tests for filter and export logic
-  - `pyproject.toml` - interface dependencies
+TrainFlow is a single Git repository containing four cooperating components, each
+independently testable with its own `pyproject.toml`:
+
+```
+TrainFlow/
+├─ compose.yaml                  # orchestrates all services
+├─ .env.example                  # documented env vars (copy to .env; .env is gitignored)
+├─ docs/
+│  ├─ EX3-notes.md               # architecture, security, LLM, trace excerpt
+│  └─ runbooks/compose.md        # how to launch, verify, test, troubleshoot
+├─ services/
+│  ├─ exercise-service/          # FastAPI backend + persistence (the source of truth)
+│  │  └─ app/  main.py · db.py · models.py · repository.py · routes.py
+│  │           auth.py · auth_routes.py · workout_routes.py · plan_routes.py
+│  │           workout_repository.py · plan_repository.py · seed.py
+│  └─ coach-service/             # FastAPI LLM Coach microservice (4th service)
+│     └─ app/  main.py · routes.py · schemas.py · exercise_client.py · auth.py
+│              planner/  base · context · fallback · gemini · llm · validation · factory
+├─ interface/                    # Streamlit user-facing app
+│  └─ app.py · client.py · coach.py · permissions.py · metrics.py · ui_styles.py · export.py · filters.py
+└─ scripts/
+   ├─ refresh.py                 # async Redis-backed refresh worker
+   └─ demo.sh                    # local end-to-end demo
+```
+
+| Component | Role | Stack |
+|---|---|---|
+| `services/exercise-service` | FastAPI backend + **persistence** (SQLite/SQLModel); owns catalog, users, history, saved plans; issues/verifies JWTs | FastAPI, SQLModel, PyJWT, bcrypt |
+| `services/coach-service` | **LLM Coach microservice**; reads catalog + history over HTTP, generates schema-validated plans (Gemini/Anthropic/fallback) | FastAPI, httpx |
+| `interface` | **User-facing** Streamlit app (dashboard, coach, catalog, history, admin) | Streamlit, httpx |
+| `scripts/refresh.py` | **Async worker**: Redis queue, bounded concurrency, retries, idempotency | redis, httpx, anyio |
+
+This satisfies "one repo with at least three cooperating services (backend +
+persistence + interface)" plus a fourth microservice (the LLM Coach) and a
+background worker. Persistence is reproducible via **seed scripts** (the exercise
+service seeds demo users, a catalog, and history on first startup); no `.db`
+artifacts are committed (`.gitignore` excludes `*.db`/`.env`).
 
 ## EX2: Running the Interface
 
@@ -138,15 +159,90 @@ Interactive docs:
 - Swagger UI: `http://127.0.0.1:8000/docs`
 - ReDoc: `http://127.0.0.1:8000/redoc`
 
+## LLM provider setup
+
+The Coach works **with no API key** — it uses a deterministic fallback planner.
+To enable a real LLM:
+
+**Gemini (recommended, free tier):**
+- Get a free key at https://aistudio.google.com/apikey (no billing).
+- Set these env vars:
+  ```
+  COACH_PROVIDER=gemini
+  GEMINI_API_KEY=<your key>
+  GEMINI_MODEL=gemini-2.5-flash
+  ```
+  - **Compose:** put them in `.env` (copied from `.env.example`), then
+    `docker compose up -d --build coach-service`.
+  - **Manual:** `export COACH_PROVIDER=gemini GEMINI_API_KEY=... GEMINI_MODEL=gemini-2.5-flash`
+    in the shell that runs coach-service.
+- **Restart coach-service after changing env vars.**
+
+**Anthropic (optional, paid):** set `ANTHROPIC_API_KEY` (and optionally
+`COACH_PROVIDER=anthropic`). In `auto` mode Gemini is preferred when its key is
+present, then Anthropic, then fallback.
+
+Never commit `.env` (it is gitignored). **Tests never call a real LLM provider** —
+the LLM client is injected and mocked, so the suites run offline. See
+[`docs/EX3-notes.md`](docs/EX3-notes.md) for the full provider/fallback design.
+
+## Running without Docker (manual)
+
+Four terminals (Redis optional — only for the refresh worker):
+
+```bash
+# 1. Exercise backend (persistence + auth)
+cd services/exercise-service && uv run uvicorn app.main:app --port 8000
+
+# 2. Coach service
+cd services/coach-service && JWT_SECRET=dev-secret-change-me-in-production-please-32b \
+  EXERCISE_API_URL=http://localhost:8000 uv run uvicorn app.main:app --port 8001
+
+# 3. Interface
+cd interface && TRAINFLOW_API_URL=http://localhost:8000 \
+  TRAINFLOW_COACH_URL=http://localhost:8001 uv run streamlit run app.py
+
+# 4. (optional) Refresh worker — requires a local Redis on :6379
+cd scripts && REDIS_URL=redis://localhost:6379 EXERCISE_API_URL=http://localhost:8000 \
+  uv run python refresh.py once --enqueue --job-id demo-1
+```
+
+`JWT_SECRET` must match between the two services. Demo logins: `admin` /
+`admin123` (full access) and `athlete` / `athlete123`; or register a new athlete.
+
 ## Run the Tests
 
-Each component has its own suite:
+Each component has its own suite (all run offline — no real LLM/network calls):
 ```bash
-cd services/exercise-service && uv run pytest   # catalog, auth, history
-cd services/coach-service    && uv run pytest   # planner, context, fake-LLM, auth
+cd services/exercise-service && uv run pytest   # catalog, auth, registration, history, plans
+cd services/coach-service    && uv run pytest   # planner, context, providers, validation, auth
 cd scripts                   && uv run pytest   # refresh worker (anyio + fakeredis)
-cd interface                 && uv run pytest   # filters, export, coach helpers
+cd interface                 && uv run pytest   # filters, export, coach/permissions/ui helpers
 ```
+
+> Schemathesis is not configured for this project; the pytest suites above are
+> the automated test coverage. There is no CI workflow committed — run the suites
+> locally with the commands above.
+
+## AI Assistance
+
+This project was built with the help of **Claude Code** (Anthropic's CLI coding
+assistant) used iteratively, one phase at a time (persistence + auth → workout
+history → coach service → refresh worker → interface → compose → docs → polish).
+
+- **Prompts** were scoped, phase-by-phase requests (e.g. "migrate the exercise
+  service to SQLModel/SQLite and add JWT auth with scoped writes", "add a
+  history-aware coach service with an injected LLM client and a deterministic
+  fallback", "fix multiselect chip contrast"). The Anthropic API integration was
+  written against Anthropic's official API reference rather than from memory.
+- **Verification was local and explicit.** Every change was checked by running
+  the component test suites (`uv run pytest`), and the Streamlit UI was validated
+  with Streamlit's `AppTest` harness (render-without-exception checks) plus manual
+  review. Cross-service flows (auth, registration, per-user history isolation,
+  plan persistence) were smoke-tested end-to-end against the running services.
+  All AI-generated code was read and adjusted before committing; design decisions
+  (data model, auth/scope model, service boundaries, LLM bounding) were made and
+  reviewed manually.
 
 ## Available Endpoints
 

@@ -29,7 +29,7 @@ services:
       COACH_USE_LLM: ${COACH_USE_LLM:-true}
       # Gemini (free cloud tier — recommended)
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       # Anthropic (paid)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       COACH_MODEL: ${COACH_MODEL:-claude-opus-4-8}

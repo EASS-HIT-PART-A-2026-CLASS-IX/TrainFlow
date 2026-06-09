@@ -15,8 +15,16 @@ cp .env.example .env
 ```
 
 Defaults work out of the box. The app runs **fully without an API key** — the
-coach uses its deterministic fallback planner. To enable the LLM planner, set
-`ANTHROPIC_API_KEY` in `.env`.
+coach uses its deterministic fallback planner. To enable the real Gemini LLM, set
+these in `.env` (compose reads `.env` automatically) and rebuild coach-service:
+
+```ini
+COACH_PROVIDER=gemini
+GEMINI_API_KEY=<your free key from https://aistudio.google.com/apikey>
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+`.env` is gitignored — never commit it. Anthropic is optional (`ANTHROPIC_API_KEY`).
 
 ## 2. Start the stack
 
@@ -36,6 +44,33 @@ catalog, and recent workout history.
 
 Demo logins: `admin` / `admin123` (full access), `athlete` / `athlete123`
 (history + coach).
+
+### Verify health
+
+```bash
+curl -i http://localhost:8000/            # exercise-service -> 200 {"message": ...}
+curl -i http://localhost:8001/health      # coach-service    -> 200 {"status":"ok","provider":"fallback"|"gemini"|"anthropic"}
+docker compose ps                         # all services "healthy"
+```
+
+The coach `/health` `provider` field tells you which planner is active. Note:
+this project does **not** implement rate limiting, so there are no
+`X-RateLimit-*` headers to verify; health is verified via the endpoints above and
+the compose healthchecks.
+
+### Run the tests
+
+The automated coverage is pytest (run per component; all offline — no real LLM):
+
+```bash
+cd services/exercise-service && uv run pytest   # catalog, auth, registration, history, plans
+cd services/coach-service    && uv run pytest   # planner, context, providers, validation, auth
+cd scripts                   && uv run pytest   # refresh worker (anyio + fakeredis)
+cd interface                 && uv run pytest   # filters, export, coach/permissions/ui helpers
+```
+
+Schemathesis is **not** configured for this project — use the pytest suites
+above. There is no committed CI workflow; run the suites locally.
 
 ## 3. Use it
 
@@ -72,20 +107,23 @@ zero-billing LLM, use Google Gemini:
 ```bash
 # 1. Get a free API key (no billing) at https://aistudio.google.com/apikey
 
-# 2. Add it to .env
-echo "GEMINI_API_KEY=your-key-here" >> .env
+# 2. Add these to .env
+#    COACH_PROVIDER=gemini
+#    GEMINI_API_KEY=your-key-here
+#    GEMINI_MODEL=gemini-2.5-flash
 
-# 3. Restart the coach
+# 3. Restart the coach (env vars are only read at startup)
 docker compose up -d --build coach-service
 ```
 
-In `auto` mode the coach uses Gemini automatically when `GEMINI_API_KEY` is set,
-so generated plans now show `generated_by: "llm"`. If Gemini is unreachable or
-rate-limited, the coach transparently falls back to the deterministic planner.
-Override the model with `GEMINI_MODEL` in `.env` (default `gemini-2.0-flash`).
+Generated plans then show `generated_by: "llm"`. If Gemini is unreachable,
+rate-limited, or returns an unparseable response, the coach **transparently falls
+back** to the deterministic planner — generation never fails. The default model
+is `gemini-2.5-flash`; override via `GEMINI_MODEL`.
 
 To use Anthropic Claude instead, set `ANTHROPIC_API_KEY` (and optionally
-`COACH_PROVIDER=anthropic`).
+`COACH_PROVIDER=anthropic`). In `auto` mode Gemini is preferred when its key is
+present, then Anthropic, then fallback.
 
 ## 5. Optional — the refresh worker
 
@@ -115,6 +153,17 @@ docker compose down -v       # also remove the SQLite volume (fresh seed next ti
   in `compose.yaml` (e.g. `"8010:8000"`).
 - **Coach returns 502** — the exercise service isn't healthy yet; wait for its
   healthcheck or check `docker compose logs exercise-service`.
-- **Coach always says "fallback"** — expected without `ANTHROPIC_API_KEY`. Set it
-  in `.env` and `docker compose up -d --build coach-service`.
-- **Reset all data** — `docker compose down -v` drops the `trainflow-db` volume.
+- **Coach always says "fallback"** — expected with no LLM key. Set
+  `COACH_PROVIDER=gemini` + `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) in `.env`
+  and `docker compose up -d --build coach-service`. Check
+  `docker compose logs coach-service` — a failed LLM call logs the provider and a
+  redacted error, then falls back.
+- **Stale SQLite schema** (e.g. after a model change, errors about missing
+  columns) — delete the local database and restart so it re-creates and re-seeds:
+  `docker compose down -v && docker compose up --build` (compose), or delete the
+  `*.db` file for a manual run. The DB is seed-reproducible, so this is safe.
+- **Redis not running** — only the opt-in refresh worker needs Redis. If you ran
+  `--profile worker` without Redis, start it (`docker compose up -d redis`); the
+  core app (API, coach, interface) does not require Redis.
+- **Reset all data** — `docker compose down -v` drops the `trainflow-db` volume
+  and the catalog/users/history/plans are re-seeded on next startup.
