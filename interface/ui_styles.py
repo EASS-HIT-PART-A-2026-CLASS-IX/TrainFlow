@@ -149,6 +149,20 @@ section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checke
   box-shadow: 0 0 0 2px rgba(0,229,160,0.35) !important;
 }}
 
+/* Multiselect selected chips/tags (equipment, focus muscles, likes/dislikes,
+   and every other multiselect) — readable dark text on bright green, including
+   the remove "x" icon. Applied globally via the BaseWeb tag selector. */
+span[data-baseweb="tag"] {{
+  background-color: var(--tf-accent) !important;
+  color: #06231b !important;
+  border: none !important;
+}}
+span[data-baseweb="tag"] span {{ color: #06231b !important; }}
+span[data-baseweb="tag"] svg {{ fill: #06231b !important; color: #06231b !important; }}
+span[data-baseweb="tag"] [role="presentation"]:hover {{
+  background-color: rgba(6,35,27,0.20) !important;
+}}
+
 /* Primary / CTA: dark text on bright green for strong contrast. */
 button[kind="primary"], button[kind="primaryFormSubmit"],
 [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {{

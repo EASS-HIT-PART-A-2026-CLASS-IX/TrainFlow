@@ -59,6 +59,17 @@ def test_styles_have_global_button_rules_and_readable_primary():
     assert "color: #ffffff !important" not in css  # never force white on the green CTA
 
 
+def test_styles_make_multiselect_chips_readable():
+    css = ui.styles()
+    # Global BaseWeb tag selector covers all multiselects (not one field).
+    assert 'span[data-baseweb="tag"]' in css
+    # Chip label + value use dark text on the green chip.
+    assert "color: #06231b !important" in css
+    # The remove "x" icon is recolored too.
+    assert 'span[data-baseweb="tag"] svg' in css
+    assert "fill: #06231b !important" in css
+
+
 def test_provider_label_mapping():
     assert ui.provider_label("gemini") == "Gemini"
     assert ui.provider_label("anthropic") == "Anthropic"
