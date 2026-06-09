@@ -46,10 +46,23 @@ Demo logins: `admin` / `admin123` (full access), `athlete` / `athlete123`
 2. Use the **sidebar navigation** (Dashboard · AI Coach · Exercise Catalog ·
    Workout History · Admin Catalog for admins). On **AI Coach**, set a
    goal/schedule → **Generate plan**; the plan renders as day cards with a coach
-   mode indicator (Gemini / Anthropic / built-in fallback).
-3. **Workout History** → log and view your own sessions. Athletes see only their
+   mode indicator (Gemini / Anthropic / built-in fallback). You can **export the
+   plan as a PNG** and **log any day as a workout** straight from the result.
+3. Your latest plan is **persisted per user** — log out and back in and it's
+   still there (so the "Log Day" action stays available). Plans are private to
+   each user.
+4. **Workout History** → log and view your own sessions. Athletes see only their
    own; admins see everyone's. **Admin Catalog** (add/edit/delete exercises) is
    visible to admins only.
+
+### Demo flow
+
+1. Register or log in.
+2. **AI Coach** → Generate plan (watch the staged "Coach is building your plan…"
+   status).
+3. Log out, then log back in as the same user — the latest plan is still shown.
+4. **Export plan as PNG** from the Coach result.
+5. **Log Day N as a workout** to push it into your history.
 
 ## 4. Optional — free cloud LLM (Gemini)
 

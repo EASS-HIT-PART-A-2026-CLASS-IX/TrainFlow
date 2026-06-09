@@ -3,6 +3,8 @@ shaping the response for display. Kept free of Streamlit and HTTP so they can be
 unit-tested directly.
 """
 
+import re
+
 GOALS = ["strength", "hypertrophy", "endurance", "general"]
 EXPERIENCES = ["beginner", "intermediate", "advanced"]
 
@@ -33,6 +35,39 @@ def build_plan_payload(
         "target_muscles": list(target_muscles),
         "avoid_exercise_ids": list(avoid_exercise_ids),
         "history_limit": int(history_limit),
+    }
+
+
+def plan_record_payload(plan: dict, request: dict | None = None) -> dict:
+    """Build the body for persisting a generated plan (exercise-service POST /plans)."""
+    return {
+        "goal": plan.get("goal", "general"),
+        "generated_by": plan.get("generated_by", "fallback"),
+        "request": request or {},
+        "plan": plan,
+    }
+
+
+def first_int(value, default: int = 10) -> int:
+    """Parse the first integer from a reps string like '8-12' or 'AMRAP'."""
+    match = re.search(r"\d+", str(value))
+    return int(match.group()) if match else default
+
+
+def plan_day_to_session(day: dict, goal: str, date_iso: str) -> dict:
+    """Convert a plan day into a loggable workout-session payload."""
+    return {
+        "date": date_iso,
+        "goal": goal,
+        "exercises": [
+            {
+                "exercise_id": item["exercise_id"],
+                "sets": max(1, min(10, int(item.get("sets", 3)))),
+                "reps": max(1, min(100, first_int(item.get("reps")))),
+                "weight": None,
+            }
+            for item in day.get("items", [])
+        ],
     }
 
 

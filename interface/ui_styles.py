@@ -116,11 +116,40 @@ h1, h2, h3 {{ letter-spacing: -0.02em; }}
 }}
 .tf-empty .tf-empty-title {{ color: #cdd6e0; font-weight: 600; font-size: 1.05rem; margin-bottom: 6px; }}
 
-/* Buttons */
-.stButton > button {{ border-radius: 10px; font-weight: 600; }}
+/* Sidebar navigation — keep st.radio (reliable) but hide the radio dots and
+   render options as clean, full-width menu rows. */
+section[data-testid="stSidebar"] div[role="radiogroup"] {{ gap: 4px; }}
+section[data-testid="stSidebar"] div[role="radiogroup"] > label {{
+  width: 100%; margin: 0; padding: 9px 12px;
+  border-radius: 10px; border: 1px solid transparent; cursor: pointer;
+}}
+section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-child {{
+  display: none;  /* hide the radio circle */
+}}
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {{
+  background: rgba(255,255,255,0.05);
+}}
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {{
+  background: rgba(0,229,160,0.12); border-color: rgba(0,229,160,0.30);
+}}
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) p {{
+  color: var(--tf-accent); font-weight: 600;
+}}
 
-/* Primary / CTA buttons: dark text on bright green for strong contrast.
-   Scoped to primary buttons only so secondary buttons keep their default look. */
+/* Buttons — global, readable on dark. Base = dark neutral with light text. */
+.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {{
+  border-radius: 10px; font-weight: 600;
+  background-color: #1b222c; color: #e6edf3;
+  border: 1px solid rgba(255,255,255,0.14);
+}}
+.stButton > button:hover, .stDownloadButton > button:hover, .stFormSubmitButton > button:hover {{
+  background-color: #232c39; color: #ffffff; border-color: rgba(255,255,255,0.26);
+}}
+.stButton > button:focus, .stDownloadButton > button:focus, .stFormSubmitButton > button:focus {{
+  box-shadow: 0 0 0 2px rgba(0,229,160,0.35) !important;
+}}
+
+/* Primary / CTA: dark text on bright green for strong contrast. */
 button[kind="primary"], button[kind="primaryFormSubmit"],
 [data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"] {{
   background-color: var(--tf-accent) !important;

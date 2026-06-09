@@ -9,6 +9,7 @@ from client import (
     coach_status,
     create_exercise,
     delete_exercise,
+    get_latest_plan,
     get_me,
     list_exercises,
     list_sessions,
@@ -16,10 +17,18 @@ from client import (
     login,
     register,
     request_plan,
+    save_plan,
     update_exercise,
 )
-from coach import EXPERIENCES, GOALS, build_plan_payload, plan_day_rows, resolve_avoid_ids
-from export import generate_reference_sheet
+from coach import (
+    EXPERIENCES,
+    GOALS,
+    build_plan_payload,
+    plan_day_to_session,
+    plan_record_payload,
+    resolve_avoid_ids,
+)
+from export import generate_plan_sheet, generate_reference_sheet
 from filters import apply_filters
 from metrics import compute_dashboard_metrics
 from permissions import can_manage_catalog, history_scope_label, is_admin
@@ -56,6 +65,9 @@ def _sign_in(token: str, username: str) -> None:
         st.session_state["user"] = {"username": username, "role": "athlete", "scopes": []}
     st.session_state["exercises"] = _load_exercises()
     st.session_state["nav"] = "Dashboard"
+    # Force a fresh fetch of this user's latest saved plan.
+    st.session_state.pop("last_plan", None)
+    st.session_state["last_plan_loaded"] = False
 
 
 def _goto(page: str) -> None:
@@ -165,10 +177,50 @@ def _page_dashboard(user: dict, provider: str) -> None:
     st.button("Start with Coach", type="primary", on_click=_goto, args=("AI Coach",))
 
 
+def _load_latest_plan(token: str) -> None:
+    """Fetch the user's most recent saved plan once per login."""
+    if st.session_state.get("last_plan_loaded"):
+        return
+    try:
+        record = get_latest_plan(token)
+    except BackendUnavailableError:
+        record = None
+    if record:
+        st.session_state["last_plan"] = record.get("plan")
+    st.session_state["last_plan_loaded"] = True
+
+
+def _generate_plan(token: str, payload: dict) -> None:
+    """Run the synchronous coach call behind a staged status display."""
+    if st.session_state.get("generating"):
+        return
+    st.session_state["generating"] = True
+    try:
+        with st.status("Coach is building your plan…", expanded=True) as status:
+            st.write("Reading your exercise catalog")
+            st.write("Reviewing your recent workout history")
+            st.write("Sending a structured request to the Coach")
+            plan = request_plan(payload, token)
+            st.write("Validating the plan against the catalog")
+            try:
+                save_plan(plan_record_payload(plan, payload), token)
+            except (BackendUnavailableError, ValueError):
+                pass  # persistence is best-effort; the plan still displays
+            status.update(label="Plan ready", state="complete")
+        st.session_state["last_plan"] = plan
+    except BackendUnavailableError:
+        st.error("Cannot reach the coach service. Is it running on port 8001?")
+    except ValueError as exc:
+        st.error(f"Coach error: {exc}")
+    finally:
+        st.session_state["generating"] = False
+
+
 def _page_coach(user: dict, provider: str) -> None:
     token = st.session_state["token"]
     catalog = _catalog()
     catalog_by_id = {ex["id"]: ex for ex in catalog if "id" in ex}
+    _load_latest_plan(token)
 
     st.subheader("AI Coach")
     _md(ui.provider_badge(provider))
@@ -188,7 +240,12 @@ def _page_coach(user: dict, provider: str) -> None:
             avoid_names = st.multiselect(
                 "Avoid exercises (dislikes)", [ex["name"] for ex in catalog]
             )
-            submitted = st.form_submit_button("Generate plan", type="primary", width="stretch")
+            submitted = st.form_submit_button(
+                "Generate plan",
+                type="primary",
+                width="stretch",
+                disabled=st.session_state.get("generating", False),
+            )
 
     if submitted:
         payload = build_plan_payload(
@@ -200,15 +257,7 @@ def _page_coach(user: dict, provider: str) -> None:
             target_muscles=target_muscles,
             avoid_exercise_ids=resolve_avoid_ids(avoid_names, catalog),
         )
-        try:
-            with st.spinner("Coach is designing your plan..."):
-                st.session_state["last_plan"] = request_plan(payload, token)
-        except BackendUnavailableError:
-            st.session_state["last_plan"] = None
-            st.error("Cannot reach the coach service. Is it running on port 8001?")
-        except ValueError as exc:
-            st.session_state["last_plan"] = None
-            st.error(f"Coach error: {exc}")
+        _generate_plan(token, payload)
 
     with result_col:
         plan = st.session_state.get("last_plan")
@@ -219,10 +268,30 @@ def _page_coach(user: dict, provider: str) -> None:
         _md(ui.provider_badge(plan.get("generated_by", provider)))
         for insight in plan.get("insights", []):
             _md(ui.insight_panel(insight))
+
         for index, day in enumerate(plan.get("days", []), start=1):
             _md(ui.plan_day_card(index, day.get("focus", "Workout"), day.get("items", []), catalog_by_id))
+            if day.get("items") and st.button(
+                f"Log Day {index} as a workout", key=f"log_day_{index}"
+            ):
+                try:
+                    log_session(
+                        plan_day_to_session(day, plan.get("goal", "general"), dt.date.today().isoformat()),
+                        token,
+                    )
+                    st.success(f"Logged Day {index} to your history.")
+                except (BackendUnavailableError, ValueError) as exc:
+                    st.error(f"Could not log: {exc}")
+
         if plan.get("notes"):
             st.caption(plan["notes"])
+
+        st.download_button(
+            "Export plan as PNG",
+            data=generate_plan_sheet(plan),
+            file_name="trainflow_plan.png",
+            mime="image/png",
+        )
 
 
 def _page_catalog() -> None:
@@ -461,7 +530,7 @@ def _sidebar_nav(user: dict, provider: str) -> str:
         page = st.radio("Navigation", pages, key="nav", label_visibility="collapsed")
         st.divider()
         if st.button("Log out", width="stretch"):
-            for key in ("token", "username", "user", "last_plan"):
+            for key in ("token", "username", "user", "last_plan", "last_plan_loaded", "generating"):
                 st.session_state.pop(key, None)
             st.rerun()
     return page

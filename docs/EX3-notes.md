@@ -167,6 +167,17 @@ Because the catalog-only validation/repair layer runs regardless of provider, a
 smaller free model is safe — bad or hallucinated picks are dropped and topped up
 from the fallback.
 
+### Plan persistence & export
+
+Generated plans are persisted per user in exercise-service (`WorkoutPlanRecord`:
+owner, created_at, goal, generated_by, request + plan JSON). Endpoints
+(`coach:use` scope, owner-scoped): `POST /plans` (save), `GET /plans/latest`,
+`GET /plans`. The interface saves each generated plan and re-fetches the user's
+latest on login, so the plan — and its "Log Day as a workout" action — survives
+logout/relogin. Plans are private to each user. The Coach result can also be
+**exported as a PNG** (TrainFlow header, goal, provider, day-by-day exercises
+with sets/reps/rest, reasons, and coach notes — no raw JSON).
+
 ## Redis job / idempotency model
 
 - Queue: Redis list `coach:refresh:queue`.

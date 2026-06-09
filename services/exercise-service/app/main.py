@@ -5,6 +5,7 @@ from sqlmodel import Session
 
 from app.auth_routes import router as auth_router
 from app.db import engine, init_db
+from app.plan_routes import router as plan_router
 from app.routes import router
 from app.seed import seed_all
 from app.workout_routes import router as workout_router
@@ -22,6 +23,7 @@ app = FastAPI(title="Workout Exercise Catalog API", lifespan=lifespan)
 app.include_router(router)
 app.include_router(auth_router)
 app.include_router(workout_router)
+app.include_router(plan_router)
 
 
 @app.get("/")

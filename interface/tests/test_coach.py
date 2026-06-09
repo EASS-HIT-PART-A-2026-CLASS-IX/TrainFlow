@@ -1,4 +1,11 @@
-from coach import build_plan_payload, plan_day_rows, resolve_avoid_ids
+from coach import (
+    build_plan_payload,
+    first_int,
+    plan_day_rows,
+    plan_day_to_session,
+    plan_record_payload,
+    resolve_avoid_ids,
+)
 
 _CATALOG = [
     {"id": 1, "name": "Barbell Bench Press"},
@@ -58,3 +65,33 @@ def test_plan_day_rows_flattens_items():
 def test_plan_day_rows_falls_back_to_id_when_name_missing():
     rows = plan_day_rows({"items": [{"exercise_id": 7, "sets": 3, "reps": "5", "rest_seconds": 120}]})
     assert rows[0]["Exercise"] == "#7"
+
+
+def test_plan_record_payload_shape():
+    plan = {"goal": "strength", "generated_by": "gemini", "days": []}
+    out = plan_record_payload(plan, {"goal": "strength"})
+    assert out == {
+        "goal": "strength",
+        "generated_by": "gemini",
+        "request": {"goal": "strength"},
+        "plan": plan,
+    }
+
+
+def test_first_int_parses_ranges_and_defaults():
+    assert first_int("8-12") == 8
+    assert first_int("15") == 15
+    assert first_int("AMRAP", default=10) == 10
+
+
+def test_plan_day_to_session_builds_valid_payload():
+    day = {"focus": "Push", "items": [
+        {"exercise_id": 1, "exercise_name": "Bench", "sets": 4, "reps": "8-12", "rest_seconds": 90},
+        {"exercise_id": 2, "exercise_name": "Dip", "sets": 99, "reps": "AMRAP", "rest_seconds": 60},
+    ]}
+    out = plan_day_to_session(day, "hypertrophy", "2026-06-08")
+    assert out["date"] == "2026-06-08" and out["goal"] == "hypertrophy"
+    assert out["exercises"][0] == {"exercise_id": 1, "sets": 4, "reps": 8, "weight": None}
+    # sets clamped to <=10, reps parsed/defaulted within range
+    assert out["exercises"][1]["sets"] == 10
+    assert 1 <= out["exercises"][1]["reps"] <= 100

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from enum import Enum
 
 from pydantic import AnyUrl, BaseModel, Field, field_validator, model_validator
@@ -125,6 +125,20 @@ class WorkoutExercise(SQLModel, table=True):
     weight: float | None = None
 
 
+class WorkoutPlanRecord(SQLModel, table=True):
+    """A generated Coach plan, persisted per user so it survives relogin."""
+
+    __tablename__ = "workoutplan"
+
+    id: int | None = SQLField(default=None, primary_key=True)
+    owner: str = SQLField(index=True)
+    created_at: datetime = SQLField(default_factory=lambda: datetime.now(timezone.utc))
+    goal: str
+    generated_by: str
+    request_json: dict = SQLField(sa_column=Column(JSON))
+    plan_json: dict = SQLField(sa_column=Column(JSON))
+
+
 # ---------------------------------------------------------------------------
 # Workout history API schemas. Kept intentionally lightweight.
 # ---------------------------------------------------------------------------
@@ -154,6 +168,25 @@ class WorkoutSessionRead(BaseModel):
     goal: Goal
     notes: str | None = None
     exercises: list[WorkoutExerciseRead]
+
+
+# Coach plan persistence schemas. The plan/request payloads are opaque dicts
+# (validated by the coach service); this service only stores and scopes them.
+class PlanRecordInput(BaseModel):
+    goal: str
+    generated_by: str
+    request: dict = Field(default_factory=dict)
+    plan: dict
+
+
+class PlanRecordRead(BaseModel):
+    id: int
+    owner: str
+    created_at: datetime
+    goal: str
+    generated_by: str
+    request: dict
+    plan: dict
 
 
 # ---------------------------------------------------------------------------

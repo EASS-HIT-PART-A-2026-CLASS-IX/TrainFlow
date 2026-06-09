@@ -41,6 +41,24 @@ def test_hero_center_adds_class():
     assert "tf-hero-center" not in ui.hero("T", "tag")
 
 
+def test_styles_hide_sidebar_radio_dots():
+    css = ui.styles()
+    # The radio circle (first child of each option label) is hidden.
+    assert 'div[role="radiogroup"] > label > div:first-child' in css
+    assert "display: none" in css
+
+
+def test_styles_have_global_button_rules_and_readable_primary():
+    css = ui.styles()
+    # Global button selectors (not just one button).
+    assert ".stButton > button" in css
+    assert ".stDownloadButton > button" in css
+    assert ".stFormSubmitButton > button" in css
+    # Primary CTA uses dark text on green — no white-on-light-green.
+    assert "#06231b" in css  # dark text for primary buttons
+    assert "color: #ffffff !important" not in css  # never force white on the green CTA
+
+
 def test_provider_label_mapping():
     assert ui.provider_label("gemini") == "Gemini"
     assert ui.provider_label("anthropic") == "Anthropic"

@@ -64,3 +64,70 @@ def generate_reference_sheet(exercises: list[dict]) -> bytes:
     plt.close(fig)
     buf.seek(0)
     return buf.read()
+
+
+_PROVIDER_NAMES = {"gemini": "Gemini", "anthropic": "Anthropic", "llm": "AI", "fallback": "Built-in planner"}
+
+
+def _plan_lines(plan: dict) -> list[tuple[str, str]]:
+    """Return (style, text) lines describing the plan, for rendering."""
+    lines: list[tuple[str, str]] = []
+    goal = plan.get("goal", "")
+    provider = _PROVIDER_NAMES.get(str(plan.get("generated_by", "")).lower(), "")
+    subtitle = f"Goal: {goal}"
+    if provider:
+        subtitle += f"   ·   Coach: {provider}"
+    lines.append(("subtitle", subtitle))
+
+    for insight in plan.get("insights", []):
+        lines.append(("insight", f"• {insight}"))
+
+    for index, day in enumerate(plan.get("days", []), start=1):
+        lines.append(("day", f"Day {index} — {day.get('focus', 'Workout')}"))
+        for item in day.get("items", []):
+            name = item.get("exercise_name") or f"#{item.get('exercise_id')}"
+            meta = f"{item.get('sets')} sets x {item.get('reps')} reps · {item.get('rest_seconds')}s rest"
+            lines.append(("item", f"{name} — {meta}"))
+            if item.get("rationale"):
+                lines.append(("why", f"    {item['rationale']}"))
+
+    if plan.get("notes"):
+        lines.append(("notes", f"Coach notes: {plan['notes']}"))
+    return lines
+
+
+def generate_plan_sheet(plan: dict) -> bytes:
+    """Render a generated Coach plan as a clean, readable PNG (no raw JSON)."""
+    lines = _plan_lines(plan or {})
+
+    fig_height = max(3.0, 0.32 * (len(lines) + 4))
+    fig, ax = plt.subplots(figsize=(9, fig_height))
+    ax.axis("off")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+
+    ax.text(0.0, 1.0, "TrainFlow — Workout Plan", fontsize=17, fontweight="bold",
+            color="#0a6e54", va="top")
+
+    styles = {
+        "subtitle": dict(fontsize=11, color="#444444", fontweight="bold"),
+        "insight": dict(fontsize=9.5, color="#0a6e54", style="italic"),
+        "day": dict(fontsize=12, color="#111111", fontweight="bold"),
+        "item": dict(fontsize=10, color="#222222"),
+        "why": dict(fontsize=8.5, color="#777777", style="italic"),
+        "notes": dict(fontsize=9.5, color="#444444", style="italic"),
+    }
+
+    y = 0.92
+    step = 0.9 / max(1, len(lines) + 1)
+    for kind, text in lines:
+        if kind == "day":
+            y -= step * 0.4
+        ax.text(0.02, y, text[:110], va="top", **styles.get(kind, {}))
+        y -= step
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight", dpi=130, facecolor="white")
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()

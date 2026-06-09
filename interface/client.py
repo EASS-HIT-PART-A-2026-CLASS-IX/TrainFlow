@@ -154,6 +154,35 @@ def coach_status() -> str:
     return "unavailable"
 
 
+def save_plan(record: dict, token: str) -> dict:
+    """Persist a generated coach plan for the current user."""
+    try:
+        response = httpx.post(
+            f"{_BASE_URL}/plans", json=record, headers=_auth_headers(token), timeout=5.0
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise BackendUnavailableError("Cannot connect to the backend") from exc
+    if not response.is_success:
+        detail = response.json().get("detail", "Unknown error")
+        raise ValueError(detail if isinstance(detail, str) else str(detail))
+    return response.json()
+
+
+def get_latest_plan(token: str) -> dict | None:
+    """Return the current user's most recent saved plan record, or None."""
+    try:
+        response = httpx.get(
+            f"{_BASE_URL}/plans/latest", headers=_auth_headers(token), timeout=5.0
+        )
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise BackendUnavailableError("Cannot connect to the backend") from exc
+    if response.status_code == 404:
+        return None
+    if response.is_success:
+        return response.json()
+    return None
+
+
 def request_plan(payload: dict, token: str) -> dict:
     try:
         response = httpx.post(
